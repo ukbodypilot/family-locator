@@ -124,7 +124,7 @@ class Alerter:
                 if inside_now or outside_now:  # first observation sets state silently
                     db.x("INSERT INTO fence_state VALUES(?,?,?,?)", (g["id"], dev["id"], int(inside_now), ts))
                 continue
-            who = (dev["owner"] or dev["name"]) if dev.get("owner") else dev["name"]
+            who = db.person_display(dev["owner"]) if dev.get("owner") else dev["name"]
             via = f" ({dev['name']})" if dev.get("owner") else ""
             when = time.strftime("%H:%M %a %d %b", time.localtime(ts))
             maps = f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lon:.6f}#map=16/{lat:.5f}/{lon:.5f}"
@@ -153,7 +153,7 @@ class Alerter:
         flagged = db.get_setting(key, False)
         if pct <= self.cfg.low_battery_pct and not flagged:
             db.set_setting(key, True)
-            who = dev["name"] + (f" ({dev['owner']})" if dev.get("owner") else "")
+            who = dev["name"] + (f" ({db.person_display(dev['owner'])})" if dev.get("owner") else "")
             self.notify("battery", f"{who} battery {pct:.0f}%", f"{who} battery is at {pct:.0f}%.",
                         device_id=dev["id"])
         elif pct > self.cfg.low_battery_pct + 10 and flagged:
@@ -174,7 +174,7 @@ class Alerter:
             age_h = (now - dev["last_seen"]) / 3600
             if age_h >= self.cfg.stale_hours and not flagged:
                 db.set_setting(key, True)
-                who = dev["name"] + (f" ({dev['owner']})" if dev.get("owner") else "")
+                who = dev["name"] + (f" ({db.person_display(dev['owner'])})" if dev.get("owner") else "")
                 self.notify("stale", f"{who} has not reported for {age_h:.0f} h",
                             f"{who} last reported a location {age_h:.1f} hours ago.", device_id=dev["id"])
             elif age_h < self.cfg.stale_hours and flagged:
@@ -228,7 +228,7 @@ def build_digest(cfg: Config, now: float | None = None) -> tuple[str, str]:
         status = (f"at {inside[0]['name']} since {time.strftime('%H:%M', time.localtime(inside[0]['since']))}"
                   if inside else f"last fix {time.strftime('%H:%M %a', time.localtime(last_seen))}" if last_seen
                   else "no location")
-        lines.append(f"{owner}: {status}. {s['km']} km, {len(s['trips'])} trips ({dev['name']})")
+        lines.append(f"{db.person_display(owner)}: {status}. {s['km']} km, {len(s['trips'])} trips ({dev['name']})")
         lines += moves or ["    no arrivals or departures at saved places"]
         lines.append("")
     return f"Daily summary {time.strftime('%a %d %b', time.localtime(now))}", "\n".join(lines)

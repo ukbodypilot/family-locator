@@ -172,7 +172,7 @@ const L_tracks = L.layerGroup().addTo(map);
 const L_acc = L.layerGroup().addTo(map);
 const L_devices = L.layerGroup();
 const L_points = L.layerGroup();
-const L_heat = L.heatLayer([], { radius: 18, blur: 16, minOpacity: 0.3, maxZoom: 17 });
+const L_heat = L.heatLayer([], { radius: 24, blur: 18, minOpacity: 0.45, maxZoom: 16, max: 0.6 });
 const L_stays = L.layerGroup().addTo(map);
 const L_places = L.layerGroup().addTo(map);
 const L_photos = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 });
@@ -188,7 +188,7 @@ L.control.layers(BASES, OVER, { position: "topright", collapsed: true }).addTo(m
 map.on("baselayerchange", (e) => store.set("base", e.name));
 map.on("overlayadd overlayremove", () => { store.set("overlays2", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n)); render(); });
 map.on("moveend", () => { const c = map.getCenter(); store.set("view", [c.lat, c.lng]); store.set("zoom", map.getZoom()); });
-map.on("zoomend", () => $("#map").classList.toggle("far", map.getZoom() < 14));
+map.on("zoomend", () => { $("#map").classList.toggle("far", map.getZoom() < 14); schedRender(); });
 const fly = (ll, z) => (reduceMotion ? map.setView(ll, z) : map.flyTo(ll, z, { duration: 0.6 }));
 
 /* ---------------- state ---------------- */
@@ -198,6 +198,7 @@ const S = {
   expanded: new Set(store.get("expanded", [])), afterPlaceSave: null,
 };
 const visible = (d) => S.showHidden || !d.hidden;
+const ownerName = (owner) => (S.personByName && S.personByName[owner] ? S.personByName[owner].display : owner);
 const CARRY_RANK = { phone: 0, watch: 1, tablet: 2 };
 
 function buildPeople(list) {
@@ -205,7 +206,7 @@ function buildPeople(list) {
   S.people = list.map((p) => {
     const devs = S.devices.filter((d) => d.owner === p.name && d.source !== "photos");
     const carried = devs.filter((d) => kindOf(d) in CARRY_RANK);
-    return { name: p.name, color: colors[p.name], devices: devs, carried: carried.length ? carried : devs.filter((d) => d.last) };
+    return { name: p.name, display: p.display || p.name, color: colors[p.name], devices: devs, carried: carried.length ? carried : devs.filter((d) => d.last) };
   });
   S.personByName = Object.fromEntries(S.people.map((p) => [p.name, p]));
   S.items = S.devices.filter((d) => !d.owner && d.source !== "photos");
@@ -387,7 +388,7 @@ function computeRuns() {
       if (last && last.state === states[i] && Math.abs(last.t1 - t0) < 1) last.t1 = t1;
       else runs.push({ state: states[i], t0, t1 });
     }
-    return { person: p.name, color: p.color, dev: d, runs };
+    return { person: p.name, display: p.display, color: p.color, dev: d, runs };
   });
 }
 function runColor(state, person) {
@@ -443,7 +444,7 @@ function drawLanes() {
   });
   // names + legend
   $("#laneNames").style.paddingTop = LANE_TOP + "px";
-  $("#laneNames").innerHTML = S.runs.map((R) => `<div data-p="${esc(R.person)}" style="height:${lh}px" title="${esc(R.person)}"><i style="background:${S.personByName[R.person].color}"></i><span>${esc(firstName(R.person))}</span></div>`).join("") || `<div style="height:${lh}px" class="muted">No one yet</div>`;
+  $("#laneNames").innerHTML = S.runs.map((R) => `<div data-p="${esc(R.person)}" style="height:${lh}px" title="${esc(R.display)}"><i style="background:${S.personByName[R.person].color}"></i><span>${esc(firstName(R.display))}</span></div>`).join("") || `<div style="height:${lh}px" class="muted">No one yet</div>`;
   const used = new Set(S.runs.flatMap((R) => R.runs.map((r) => r.state)));
   const leg = S.fences.filter((f) => used.has("f" + f.id)).map((f) => `<span><i style="background:${f.color}"></i><span class="place-name">${esc(f.name)}</span></span>`);
   if (used.has("move")) leg.push('<span><i style="background:linear-gradient(90deg,#c8385a,#1f78b4,#e08e0b)"></i>Moving (person\'s colour)</span>');
@@ -454,7 +455,7 @@ function drawLanes() {
 $("#laneNames").addEventListener("click", (e) => {
   const el = e.target.closest("[data-p]"); if (!el) return;
   const p = S.personByName[el.dataset.p], pos = p && personPos(p);
-  if (pos) fly([pos.p[1], pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${el.dataset.p} at this time.`);
+  if (pos) fly([pos.p[1], pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${ownerName(el.dataset.p)} at this time.`);
 });
 $("#laneTrack").addEventListener("mousemove", (e) => {
   const tr = $("#laneTrack").getBoundingClientRect(), x = e.clientX - tr.left, y = e.clientY - tr.top;
@@ -462,7 +463,7 @@ $("#laneTrack").addEventListener("mousemove", (e) => {
   if (!R || y < LANE_TOP) { tip.classList.add("hidden"); return; }
   const t = S.start + (x / tr.width) * (S.end - S.start);
   const r = R.runs.find((q) => q.t0 <= t && t <= q.t1);
-  tip.innerHTML = `<b>${esc(firstName(R.person))}</b> ${r ? `${runLabel(r.state)}, ${clock(r.t0, r.t1)} to ${clock(r.t1, r.t1)}` : `no fixes around ${clock(t)}`}`;
+  tip.innerHTML = `<b>${esc(firstName(R.display))}</b> ${r ? `${runLabel(r.state)}, ${clock(r.t0, r.t1)} to ${clock(r.t1, r.t1)}` : `no fixes around ${clock(t)}`}`;
   tip.style.left = Math.max(60, Math.min(tr.width - 60, x)) + "px"; tip.classList.remove("hidden");
 });
 $("#laneTrack").addEventListener("mouseleave", () => $("#laneTip").classList.add("hidden"));
@@ -491,7 +492,7 @@ function render(full = false) {
       const p = a[i];
       if (seg.length && p[0] - a[i - 1][0] > GAP_BREAK) flush();
       seg.push([p[1], p[2]]);
-      if (wantHeat) heat.push([p[1], p[2], 0.6]);
+      if (wantHeat) heat.push([p[1], p[2], 0.5]);
       if (wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1, fillOpacity: 0.7, renderer: canvasR }).bindPopup(() => fixPopup(d, p)).addTo(L_points);
     }
     flush();
@@ -510,19 +511,23 @@ function render(full = false) {
   }
   const groups = [];
   for (const it of placed) {
-    const g = groups.find((G) => (it.st.place && G.place && it.st.place.id === G.place.id) || haversine(G.lat, G.lon, it.lat, it.lon) < 60);
-    if (g) g.members.push(it); else groups.push({ place: it.st.place, lat: it.lat, lon: it.lon, members: [it] });
+    // merge people at the same saved place, or whose markers would overlap on screen at this zoom
+    const px = map.latLngToContainerPoint([it.lat, it.lon]);
+    const g = groups.find((G) => (it.st.place && G.place && it.st.place.id === G.place.id) || G.px.distanceTo(px) < 36);
+    if (g) { g.members.push(it); if (!g.place && it.st.place) g.place = null; }
+    else groups.push({ place: it.st.place, lat: it.lat, lon: it.lon, px, members: [it] });
   }
   for (const G of groups) {
     if (G.members.length === 1) {
       const { p, st, lat, lon } = G.members[0];
       const ic = L.divIcon({ className: "pmark" + (st.stale ? " stale" : ""), iconSize: [34, 34], iconAnchor: [17, 17],
-        html: `<div class="av" style="background:${p.color}">${esc(initials(p.name))}</div><div class="lbl">${esc(firstName(p.name))}</div>` });
-      L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.name, keyboard: true }).bindPopup(() => personPopup(p)).addTo(L_people);
+        html: `<div class="av" style="background:${p.color}">${esc(initials(p.display))}</div><div class="lbl">${esc(firstName(p.display))}</div>` });
+      L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.display, keyboard: true }).bindPopup(() => personPopup(p)).addTo(L_people);
     } else {
-      const avs = G.members.map(({ p }) => `<div class="av" style="background:${p.color}" title="${esc(p.name)}">${esc(initials(p.name))}</div>`).join("");
+      if (G.place && G.members.some((m) => !m.st.place || m.st.place.id !== G.place.id)) G.place = null;
+      const avs = G.members.map(({ p }) => `<div class="av" style="background:${p.color}" title="${esc(p.display)}">${esc(initials(p.display))}</div>`).join("");
       const ic = L.divIcon({ className: "", iconSize: null, html: `<div class="gmark">${avs}${G.place ? `<span class="place-name">${esc(G.place.name)}</span>` : ""}</div>` });
-      const names = G.members.map(({ p }) => firstName(p.name)).join(", ");
+      const names = G.members.map(({ p }) => firstName(p.display)).join(", ");
       L.marker([G.lat, G.lon], { icon: ic, zIndexOffset: 1000, title: names }).bindPopup(() => groupPopup(G)).addTo(L_people);
     }
   }
@@ -554,7 +559,7 @@ function popupEl(html, handlers) {
 function personPopup(p) {
   const st = personStatus(p), [ts, lat, lon, acc] = st.pos.p, d = st.pos.dev;
   const canLocate = d.source === "icloud";
-  return popupEl(`<h3>${esc(p.name)}</h3><p>${st.text}</p>
+  return popupEl(`<h3>${esc(p.display)}</h3><p>${st.text}</p>
     <table><tr><td>Fix</td><td>${esc(dt(ts))} (${esc(ago(ts))})</td></tr>
     <tr><td>From</td><td>${esc(d.name)}</td></tr>
     <tr><td>Accuracy</td><td>${acc != null ? `within ${Math.round(acc)} m` : "unknown"}</td></tr>
@@ -566,14 +571,14 @@ function personPopup(p) {
 }
 function groupPopup(G) {
   return popupEl(`<h3>${G.place ? `<span class="place-name">${esc(G.place.name)}</span>` : "Together"}</h3>
-    <table>${G.members.map(({ p, ts }) => `<tr><td>${esc(p.name)}</td><td>${esc(ago(ts))}</td></tr>`).join("")}</table>
+    <table>${G.members.map(({ p, ts }) => `<tr><td>${esc(p.display)}</td><td>${esc(ago(ts))}</td></tr>`).join("")}</table>
     <div class="acts">${G.place ? "" : '<a data-a="place">Make this a place</a>'}<a data-a="zoom">Zoom in</a></div>`, {
     place: () => newPlace(G.lat, G.lon), zoom: () => fly([G.lat, G.lon], 19),
   });
 }
 function fixPopup(d, p, current = false) {
   const [ts, lat, lon, acc, batt, kind, meta] = p;
-  return popupEl(`<h3>${esc(d.name)}</h3>${d.owner ? `<p class="muted">${esc(d.owner)}</p>` : ""}
+  return popupEl(`<h3>${esc(d.name)}</h3>${d.owner ? `<p class="muted">${esc(ownerName(d.owner))}</p>` : ""}
     <table><tr><td>When</td><td>${esc(dt(ts))} (${esc(ago(ts))})</td></tr>
     <tr><td>Accuracy</td><td>${acc != null ? `within ${Math.round(acc)} m` : "unknown"}</td></tr>
     ${batt != null ? `<tr><td>Battery</td><td>${Math.round(batt * 100)}%</td></tr>` : ""}
@@ -627,10 +632,10 @@ function renderPeople() {
     const devs = p.devices.filter(visible);
     const withFix = devs.filter((d) => d.last).sort((a, b) => b.last.ts - a.last.ts), noFix = devs.filter((d) => !d.last);
     const open = S.expanded.has(p.name);
-    box.innerHTML = `<div class="person-main" tabindex="0" role="button" aria-label="Show ${esc(p.name)} on the map">
-        <div class="avatar" style="background:${p.color}">${esc(initials(p.name))}</div>
-        <div class="person-name">${esc(p.name)}</div>
-        <div class="person-side">${st.pos ? `<span>${esc(st.when)}</span>` : ""}${battHTML(dev)}</div>
+    box.innerHTML = `<div class="person-main" tabindex="0" role="button" aria-label="Show ${esc(p.display)} on the map">
+        <div class="avatar" style="background:${p.color}">${esc(initials(p.display))}</div>
+        <div class="person-name">${esc(p.display)}${p.display !== p.name ? ` <span class="muted small" title="Name in Apple's family data">${esc(p.name)}</span>` : ""}</div>
+        <div class="person-side"><button class="dev-more person-more" aria-label="Actions for ${esc(p.display)}" aria-haspopup="menu" aria-expanded="false">⋯</button>${st.pos ? `<span>${esc(st.when)}</span>` : ""}${battHTML(dev)}</div>
         <div class="person-status ${st.stale ? "stale" : ""}">${st.text}</div>
       </div>
       <div class="devs"><button class="devs-toggle" aria-expanded="${open}">${open ? "Hide" : "Show"} ${devs.length} device${devs.length === 1 ? "" : "s"}</button><div class="dev-list"></div></div>`;
@@ -643,8 +648,8 @@ function renderPeople() {
         noFix.forEach((d) => det.appendChild(devRow(d))); list.appendChild(det);
       }
     }
-    const go = () => { if (st.pos) fly([st.pos.p[1], st.pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${p.name} yet.`); if (isPhone()) $("#app").classList.add("noside"); };
-    $(".person-main", box).onclick = go;
+    const go = () => { if (st.pos) fly([st.pos.p[1], st.pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${p.display} yet.`); if (isPhone()) $("#app").classList.add("noside"); };
+    $(".person-main", box).onclick = (e) => { if (e.target.closest(".person-more")) return personMenu(p, e.target.closest(".person-more")); go(); };
     $(".person-main", box).onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
     $(".avatar", box).title = "Change colour";
     $(".avatar", box).onclick = (e) => { e.stopPropagation(); pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); }); };
@@ -688,6 +693,19 @@ function devMenu(d, btn) {
   items.push(["Rename", async () => { const n = prompt("Name for this device", d.name); if (n) { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n } }); await refreshAll(); } }]);
   items.push([d.hidden ? "Show this device" : "Hide this device", async () => { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { hidden: d.hidden ? 0 : 1 } }); await refreshAll(); }]);
   openMenu(r.left, r.bottom + 4, items, d.model || d.name);
+}
+function personMenu(p, btn) {
+  const r = btn.getBoundingClientRect(); btn.setAttribute("aria-expanded", "true");
+  openMenu(r.left - 150, r.bottom + 4, [
+    ["Rename", async () => {
+      const n = prompt(`Name to show for ${p.display}. Leave blank to use Apple's name ("${p.name}").`, p.display === p.name ? "" : p.display);
+      if (n === null) return;
+      await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { display: n } });
+      await refreshAll(); toast(n.trim() ? `Renamed to ${n.trim()}.` : `Using Apple's name, ${p.name}.`);
+    }],
+    ["Change colour", () => pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); })],
+    ["Insights", () => { const d = primaryOf(p) || p.carried[0]; if (d) openInsights(d.id); }],
+  ], p.display);
 }
 function showMarkerFor(d, p) {
   L_temp.clearLayers();
@@ -746,8 +764,8 @@ function renderPlaces() {
 ;
     L.tooltip({ permanent: true, direction: "bottom", className: "place-label", offset: [0, 2] })
       .setLatLng([g.lat - g.radius / 111320, g.lon]).setContent(esc(g.name)).addTo(L_places);
-    const here = [...new Set(g.inside.map((id) => S.byId[id]?.owner || S.byId[id]?.name).filter(Boolean))];
-    const who = g.people?.length ? `for ${g.people.map(firstName).join(", ")}` : "for everyone";
+    const here = [...new Set(g.inside.map((id) => (S.byId[id]?.owner ? ownerName(S.byId[id].owner) : S.byId[id]?.name)).filter(Boolean))];
+    const who = g.people?.length ? `for ${g.people.map((n) => firstName(ownerName(n))).join(", ")}` : "for everyone";
     const alerts = g.on_enter && g.on_exit ? "arrivals and departures" : g.on_enter ? "arrivals" : g.on_exit ? "departures" : "no alerts";
     const row = document.createElement("div"); row.className = "place-row"; row.tabIndex = 0;
     row.innerHTML = `<span class="ring" style="border-color:${g.color}"></span><div><div class="place-name">${esc(g.name)}</div>
@@ -763,7 +781,7 @@ function showPlaceForm(g) {
   $("#pfRadius").value = g.radius || 150; $("#pfColor").value = g.color || "#9a6b43";
   $("#pfEnter").checked = g.on_enter ?? true; $("#pfExit").checked = g.on_exit ?? true;
   $("#pfDelete").classList.toggle("hidden", !g.id);
-  $("#pfPeople").innerHTML = S.people.map((p) => `<label class="toggle"><input type="checkbox" value="${esc(p.name)}" ${(g.people || []).includes(p.name) ? "checked" : ""}> ${esc(p.name)}</label>`).join("");
+  $("#pfPeople").innerHTML = S.people.map((p) => `<label class="toggle"><input type="checkbox" value="${esc(p.name)}" ${(g.people || []).includes(p.name) ? "checked" : ""}> ${esc(p.display)}</label>`).join("");
   $("#pfItems").innerHTML = S.items.map((d) => `<label class="toggle"><input type="checkbox" value="${esc(d.id)}" ${(g.devices || []).includes(d.id) ? "checked" : ""}> ${esc(d.name)}</label>`).join("");
   updatePreview(); $("#pfName").focus();
 }
@@ -824,12 +842,12 @@ const sInput = $("#search"), sBox = $("#searchResults");
 let sTimer = null, sItems = [], sSel = -1;
 function localMatches(q) {
   const lq = q.toLowerCase(), out = [];
-  for (const p of S.people) if (p.name.toLowerCase().includes(lq)) {
+  for (const p of S.people) if (`${p.display} ${p.name}`.toLowerCase().includes(lq)) {
     const pos = personPos(p, now() + 60) || personPos(p);
-    if (pos) out.push({ g: "People", name: p.name, lat: pos.p[1], lon: pos.p[2], z: 16, sub: ago(pos.p[0]) });
+    if (pos) out.push({ g: "People", name: p.display, lat: pos.p[1], lon: pos.p[2], z: 16, sub: ago(pos.p[0]) });
   }
   for (const d of S.devices) if (`${d.name} ${d.model || ""}`.toLowerCase().includes(lq) && d.last)
-    out.push({ g: "Devices", name: `${d.name}${d.owner ? ", " + firstName(d.owner) : ""}`, lat: d.last.lat, lon: d.last.lon, z: 17, sub: ago(d.last.ts) });
+    out.push({ g: "Devices", name: `${d.name}${d.owner ? ", " + firstName(ownerName(d.owner)) : ""}`, lat: d.last.lat, lon: d.last.lon, z: 17, sub: ago(d.last.ts) });
   for (const g of S.fences) if (g.name.toLowerCase().includes(lq)) out.push({ g: "Places", name: g.name, lat: g.lat, lon: g.lon, z: 16, sub: `${Math.round(g.radius)} m` });
   const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
   if (m && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180) out.unshift({ g: "Coordinates", name: `${(+m[1]).toFixed(5)}, ${(+m[2]).toFixed(5)}`, lat: +m[1], lon: +m[2], z: 17, pin: true });
@@ -881,7 +899,7 @@ document.addEventListener("click", (e) => { if (!e.target.closest(".search")) sB
 function fillDeviceSelect() {
   const sel = $("#insDevice"), cur = sel.value;
   const opt = (d) => `<option value="${esc(d.id)}">${esc(d.name)}${d.last ? "" : " (no location)"}</option>`;
-  sel.innerHTML = S.people.map((p) => `<optgroup label="${esc(p.name)}">${p.devices.map(opt).join("")}</optgroup>`).join("") +
+  sel.innerHTML = S.people.map((p) => `<optgroup label="${esc(p.display)}">${p.devices.map(opt).join("")}</optgroup>`).join("") +
     (S.items.length ? `<optgroup label="Items">${S.items.map(opt).join("")}</optgroup>` : "") +
     (S.photoDevs.length ? `<optgroup label="Photo history">${S.photoDevs.map(opt).join("")}</optgroup>` : "");
   if (cur && S.byId[cur]) sel.value = cur;

@@ -98,6 +98,13 @@ def test_digest_builds():
     assert "Daily summary" in subj and "Kid" in body
 
 
+def test_person_display_name():
+    db.set_setting("person_names", {"Kid": "Kiddo"})
+    from famloc.alerts import build_digest
+    assert db.person_display("Kid") == "Kiddo" and db.person_display("Other") == "Other"
+    assert "Kiddo:" in build_digest(cfg)[1]
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

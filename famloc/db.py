@@ -203,3 +203,10 @@ def backup(keep: int = 14) -> str:
         old.unlink()
     set_setting("last_backup", {"ts": time.time(), "path": str(dst), "bytes": dst.stat().st_size})
     return str(dst)
+
+
+def person_display(owner: str | None) -> str | None:
+    """Display name for a device owner (Apple's family names can be abbreviated, e.g. "J D")."""
+    if not owner:
+        return owner
+    return (get_setting("person_names", {}) or {}).get(owner) or owner

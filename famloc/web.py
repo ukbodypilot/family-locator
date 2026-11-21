@@ -12,7 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, analysis, config, db, geocode
@@ -332,11 +332,13 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
     @app.get("/api/people")
     def people():
         colors = db.get_setting("person_colors", {})
+        names = db.get_setting("person_names", {})
         owners = [r["owner"] for r in db.q("SELECT owner, MIN(first_seen) f FROM devices WHERE owner IS NOT NULL "
                                            "AND source!='photos' GROUP BY owner ORDER BY f")]
         out = []
         for i, o in enumerate(owners):
-            out.append({"name": o, "color": colors.get(o) or PERSON_PALETTE[i % len(PERSON_PALETTE)]})
+            out.append({"name": o, "display": names.get(o) or o,
+                        "color": colors.get(o) or PERSON_PALETTE[i % len(PERSON_PALETTE)]})
         return out
 
     @app.patch("/api/people/{name}")
@@ -345,6 +347,14 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         if body.get("color"):
             colors[name] = str(body["color"])
         db.set_setting("person_colors", colors)
+        if "display" in body:
+            names = db.get_setting("person_names", {})
+            disp = str(body["display"] or "").strip()[:60]
+            if disp and disp != name:
+                names[name] = disp
+            else:
+                names.pop(name, None)  # blank = back to Apple's name
+            db.set_setting("person_names", names)
         return {"ok": True}
 
     @app.get("/api/digest")
@@ -386,7 +396,12 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
 
     @app.get("/")
     def index():
-        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+        # Version the app's own JS/CSS URLs by file mtime so a browser can never pair a new page
+        # with a stale cached script.
+        html = (STATIC / "index.html").read_text()
+        for f in ("app.js", "app.css"):
+            html = html.replace(f"/static/{f}\"", f"/static/{f}?v={int((STATIC / f).stat().st_mtime)}\"")
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     return app

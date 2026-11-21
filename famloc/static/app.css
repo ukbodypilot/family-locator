@@ -257,3 +257,5 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
   .view-banner { top: 8px; font-size: 13px; }
 }
 #map.far .place-label { display: none; }
+.person-more { opacity: .55; grid-row: auto; padding: 0 6px; }
+.person-main:hover .person-more { opacity: 1; }
