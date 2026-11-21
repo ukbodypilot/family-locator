@@ -2,6 +2,17 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.3.1] -- 2026-11-21
+
+- **Fix: blank page when the heatmap had been left on.** The saved heatmap layer was re-added
+  while the map was still hidden and 0 pixels wide. leaflet-heat then threw on a zero-size canvas
+  and the app never started. Saved layers are now restored once the map is visible, and the heatmap
+  skips drawing on a zero-size map.
+- **Fix:** restoring saved layers no longer redraws the map before the device lists exist.
+- **A blank page now explains itself.** Browser script errors are sent to the server log
+  (`[ClientError]` lines, rate-limited). If the app hasn't started after 8 seconds, the page shows
+  the error and a Reload button instead of staying blank.
+
 ## [1.3.0] -- 2026-11-21
 
 - **Faster tracking allowed.** A person's fresh-location interval can now be as short as 1 minute

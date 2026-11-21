@@ -190,9 +190,27 @@ const OVER = {
   "People and items": L_people, "Tracks": L_tracks, "Accuracy circles": L_acc, "Every device separately": L_devices,
   "Every fix as a dot": L_points, "Heatmap": L_heat, "Stays (from Insights)": L_stays, "Places": L_places, "Photo locations": L_photos, "Railways (OpenRailwayMap)": L_rail,
 };
+// The heatmap draws onto a canvas sized to the map; with a 0-size map (page still hidden, panel
+// animating) leaflet-heat's getImageData throws and, at load time, killed the whole app.
+// Skip drawing until the map has a real size.
+for (const fn of ["_redraw", "_reset"]) {
+  const orig = L_heat[fn];
+  L_heat[fn] = function (...a) {
+    const sz = this._map && this._map.getSize();
+    if (!sz || sz.x < 1 || sz.y < 1) return this;
+    try { return orig.apply(this, a); } catch (e) { console.warn("heatmap redraw skipped:", e); return this; }
+  };
+}
+// Saved overlays are restored once the map is visible (see restoreOverlays in start()).
 const overOn = store.get("overlays2", null);
-if (overOn) for (const [n, l] of Object.entries(OVER)) { if (overOn.includes(n)) l.addTo(map); else map.removeLayer(l); }
-else L_photos.addTo(map);
+let overlaysRestored = false;
+function restoreOverlays() {
+  if (overlaysRestored) return;
+  overlaysRestored = true;
+  map.invalidateSize();
+  if (overOn) for (const [n, l] of Object.entries(OVER)) { if (overOn.includes(n)) l.addTo(map); else map.removeLayer(l); }
+  else L_photos.addTo(map);
+}
 const layerCtl = L.control.layers(BASES, OVER, { position: "topright", collapsed: true }).addTo(map);
 /* Thunderforest Transport needs a (free) API key; offered only when one is set in data/config.toml. */
 let tfAdded = false;
@@ -206,14 +224,14 @@ function addKeyedLayers(keys) {
   if (store.get("base", "") === name) { Object.values(BASES).forEach((b) => map.hasLayer(b) && map.removeLayer(b)); lyr.addTo(map); }
 }
 map.on("baselayerchange", (e) => store.set("base", e.name));
-map.on("overlayadd overlayremove", () => { store.set("overlays2", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n)); render(); });
+map.on("overlayadd overlayremove", () => { if (!overlaysRestored) return; store.set("overlays2", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n)); schedRender(); });
 map.on("moveend", () => { const c = map.getCenter(); store.set("view", [c.lat, c.lng]); store.set("zoom", map.getZoom()); });
 map.on("zoomend", () => { $("#map").classList.toggle("far", map.getZoom() < 14); schedRender(); });
 const fly = (ll, z) => (reduceMotion ? map.setView(ll, z) : map.flyTo(ll, z, { duration: 0.6 }));
 
 /* ---------------- state ---------------- */
 const S = {
-  devices: [], byId: {}, people: [], fences: [], data: {}, start: 0, end: 0, t: 0, preset: store.get("preset", "live"),
+  devices: [], byId: {}, people: [], personByName: {}, items: [], photoDevs: [], fences: [], data: {}, start: 0, end: 0, t: 0, preset: store.get("preset", "live"),
   follow: true, playing: false, firstFit: true, picking: false, showHidden: false, runs: [], lastRefresh: 0,
   expanded: new Set(store.get("expanded", [])), afterPlaceSave: null,
 };
@@ -1154,6 +1172,7 @@ async function start() {
   $("#app").classList.remove("hidden");
   if (isPhone()) $("#app").classList.add("noside");
   map.invalidateSize();
+  restoreOverlays();
   if (started) return refreshAll();
   started = true;
   await Promise.all([loadDevices(), loadFences(), loadStatus().catch(() => {})]);

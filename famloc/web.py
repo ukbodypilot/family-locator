@@ -22,7 +22,7 @@ log = logging.getLogger("famloc.web")
 STATIC = Path(__file__).resolve().parent / "static"
 COOKIE = "famloc_session"
 SESSION_DAYS = 30
-OPEN_PATHS = {"/", "/api/auth/state", "/api/auth/login", "/api/auth/setup", "/metrics", "/favicon.ico"}
+OPEN_PATHS = {"/", "/api/auth/state", "/api/auth/login", "/api/auth/setup", "/metrics", "/favicon.ico", "/api/client-error"}
 
 _fails: dict[str, list[float]] = defaultdict(list)
 
@@ -136,6 +136,24 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
             raise HTTPException(400, "use at least 8 characters")
         salt = secrets.token_bytes(16)
         db.set_setting("ui_password", {"salt": salt.hex(), "hash": _hash(pw, salt)})
+        return {"ok": True}
+
+    _client_errs: list[float] = []
+
+    @app.post("/api/client-error")
+    async def client_error(request: Request):
+        """Browser-side script errors, logged so a blank page can be diagnosed. Rate-limited."""
+        now = time.time()
+        _client_errs[:] = [t for t in _client_errs if now - t < 60]
+        if len(_client_errs) >= 20:
+            return {"ok": False}
+        _client_errs.append(now)
+        try:
+            body = json.loads((await request.body())[:8000] or b"{}")
+        except ValueError:
+            body = {}
+        log.warning("[ClientError] from %s: %s | %s | %s", _client_ip(request), str(body.get("msg", ""))[:2000],
+                    str(body.get("url", ""))[:200], str(body.get("ua", ""))[:200])
         return {"ok": True}
 
     # ------------------------------------------------------------- data

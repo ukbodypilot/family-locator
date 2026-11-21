@@ -10,6 +10,17 @@ journalctl --user-unit family-locator -n 100
 On this machine the system journal is kept in memory, so use `--user-unit`.
 `journalctl --user -u ...` can show nothing.
 
+## Blank page, or "Family Locator didn't start"
+
+If the app can't start, the page shows the error after 8 seconds and sends it to the log:
+
+```bash
+journalctl --user-unit family-locator | grep ClientError
+```
+
+Reloading usually fixes it. If it keeps happening, clearing this site's data in the browser resets
+the saved map layers and time range; nothing on the server is affected.
+
 ## A control does nothing after an update
 
 The page loads the app's script and stylesheet with a version number, so a browser can't run an
