@@ -105,6 +105,9 @@ def conn() -> sqlite3.Connection:
 
 def init() -> None:
     conn().executescript(SCHEMA)
+    cols = {r["name"] for r in q("PRAGMA table_info(geofences)")}
+    if "people" not in cols:  # v0.3: alert rules can target people (device owners)
+        x("ALTER TABLE geofences ADD COLUMN people TEXT")
     try:
         DB_PATH.chmod(0o600)
     except OSError:

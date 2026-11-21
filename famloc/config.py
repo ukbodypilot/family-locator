@@ -39,6 +39,11 @@ class Config:
     geofence_exit_margin_m: float = 50.0  # hysteresis so a fix on the boundary doesn't flap
     max_alert_accuracy_m: float = 500.0  # ignore fixes worse than this for geofence decisions
 
+    quiet_from_hour: int = -1  # no alert EMAILS from this hour... (-1 = no quiet hours)
+    quiet_to_hour: int = -1    # ...until this hour (local). Events are still logged.
+    digest_hour: int = 20      # daily summary email at this local hour (-1 = off)
+    person_dedupe_minutes: float = 15.0  # phone + watch crossing together -> one alert
+
     # Analysis
     stay_radius_m: float = 150.0
     stay_min_minutes: float = 10.0
@@ -80,6 +85,9 @@ EDITABLE = {
     "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
     "low_battery_pct": ("Low battery alert below (0 = off)", 0, 100, "%"),
     "stale_hours": ("Stale device alert after (0 = off)", 0, 720, "h"),
+    "quiet_from_hour": ("Quiet hours start, no alert emails (-1 = off)", -1, 23, "h"),
+    "quiet_to_hour": ("Quiet hours end", -1, 23, "h"),
+    "digest_hour": ("Daily summary email at (-1 = off)", -1, 23, "h"),
     "geofence_exit_margin_m": ("Leave-alert margin beyond radius", 0, 1000, "m"),
     "max_alert_accuracy_m": ("Ignore fixes worse than", 20, 5000, "m"),
     "stay_radius_m": ("Stay radius", 25, 2000, "m"),

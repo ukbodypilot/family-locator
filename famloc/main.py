@@ -25,10 +25,19 @@ def _housekeeping(alerter: Alerter, stop: threading.Event) -> None:
             last = (db.get_setting("last_backup") or {}).get("ts", 0)
             if time.time() - last > 23 * 3600:
                 log.info("backup written: %s", db.backup())
+            cfg = alerter.cfg
+            today = time.strftime("%Y-%m-%d")
+            if (cfg.digest_hour >= 0 and time.localtime().tm_hour == cfg.digest_hour
+                    and db.get_setting("last_digest") != today and alerter.email_configured()):
+                from .alerts import build_digest
+                subj, body = build_digest(cfg)
+                err = alerter.send_email(subj, body)
+                db.set_setting("last_digest", today)
+                db.add_event("info", f"Daily summary emailed" + (f" - FAILED: {err}" if err else ""))
         except Exception:  # noqa: BLE001
             log.exception("housekeeping")
             db.add_event("error", "housekeeping/backup failed - see journal")
-        if stop.wait(600):
+        if stop.wait(300):
             return
 
 

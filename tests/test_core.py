@@ -54,6 +54,50 @@ def test_dedup_points():
     assert db.add_point("icloud:t", 42.0, 1, 2) is True
     assert db.add_point("icloud:t", 42.0, 1, 2) is False
 
+
+
+def test_person_dedupe_phone_and_watch():
+    db.upsert_device("icloud:p1", "icloud", "Kid phone", owner="Kid", device_class="iPhone")
+    db.upsert_device("icloud:w1", "icloud", "Kid watch", owner="Kid", device_class="Watch")
+    gid = db.x("INSERT INTO geofences(name,lat,lon,radius) VALUES('School',40.0,-100.0,150)").lastrowid
+    sent = []
+    orig = al.notify
+    al.notify = lambda kind, subj, msg, **kw: (sent.append((kind, kw.get("email", True))), orig(kind, subj, msg, **kw))
+    try:
+        for dev_id in ("icloud:p1", "icloud:w1"):
+            dev = db.q1("SELECT * FROM devices WHERE id=?", (dev_id,))
+            al.check_fix(dev, 100, 40.0, -100.0, 10)        # learn: inside
+            al.check_fix(dev, 200, 40.01, -100.0, 10)       # ~1.1 km out: exit
+    finally:
+        al.notify = orig
+    assert [k for k, _ in sent] == ["exit", "exit"], sent
+    assert [e for _, e in sent] == [True, False], "second device of same person must not email"
+
+
+def test_people_filter():
+    db.upsert_device("icloud:o1", "icloud", "Other", owner="Other", device_class="iPhone")
+    gid = db.x("INSERT INTO geofences(name,lat,lon,radius,people) VALUES('Only kid',41.0,-100.0,150,'[\"Kid\"]')").lastrowid
+    dev = db.q1("SELECT * FROM devices WHERE id='icloud:o1'")
+    al.check_fix(dev, 100, 41.0, -100.0, 10)
+    assert db.q1("SELECT * FROM fence_state WHERE geofence_id=?", (gid,)) is None
+
+
+def test_quiet_hours():
+    import time as _t
+    c = config.Config(email_enabled=False, quiet_from_hour=22, quiet_to_hour=7)
+    a = Alerter(c)
+    base = _t.mktime((2026, 1, 1, 0, 0, 0, 0, 0, -1))
+    assert a.in_quiet_hours(base + 23 * 3600) and a.in_quiet_hours(base + 3 * 3600)
+    assert not a.in_quiet_hours(base + 12 * 3600)
+    assert not Alerter(config.Config()).in_quiet_hours(base)
+
+
+def test_digest_builds():
+    from famloc.alerts import build_digest
+    subj, body = build_digest(cfg)
+    assert "Daily summary" in subj and "Kid" in body
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

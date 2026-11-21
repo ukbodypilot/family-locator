@@ -175,24 +175,26 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         rows = db.q("SELECT * FROM geofences ORDER BY name")
         for r in rows:
             r["devices"] = json.loads(r["devices"]) if r["devices"] else []
+            r["people"] = json.loads(r["people"]) if r.get("people") else []
             r["inside"] = [s["device_id"] for s in
                            db.q("SELECT device_id FROM fence_state WHERE geofence_id=? AND inside=1", (r["id"],))]
         return rows
 
     def _fence_args(b: dict):
         return (str(b["name"]), float(b["lat"]), float(b["lon"]), max(20.0, float(b.get("radius", 150))),
-                b.get("color") or "#2563eb", int(bool(b.get("on_enter", True))),
-                int(bool(b.get("on_exit", True))), json.dumps(b.get("devices") or []))
+                b.get("color") or "#9a6b43", int(bool(b.get("on_enter", True))),
+                int(bool(b.get("on_exit", True))), json.dumps(b.get("devices") or []),
+                json.dumps(b.get("people") or []))
 
     @app.post("/api/geofences")
     def add_fence(body: dict = Body(...)):
-        cur = db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices) "
-                   "VALUES(?,?,?,?,?,?,?,?)", _fence_args(body))
+        cur = db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices,people) "
+                   "VALUES(?,?,?,?,?,?,?,?,?)", _fence_args(body))
         return {"id": cur.lastrowid}
 
     @app.put("/api/geofences/{gid}")
     def put_fence(gid: int, body: dict = Body(...)):
-        db.x("UPDATE geofences SET name=?,lat=?,lon=?,radius=?,color=?,on_enter=?,on_exit=?,devices=? WHERE id=?",
+        db.x("UPDATE geofences SET name=?,lat=?,lon=?,radius=?,color=?,on_enter=?,on_exit=?,devices=?,people=? WHERE id=?",
              (*_fence_args(body), gid))
         db.x("DELETE FROM fence_state WHERE geofence_id=?", (gid,))  # re-learn silently after a move
         return {"ok": True}
@@ -322,6 +324,42 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
             raise HTTPException(404)
         db.x("DELETE FROM points WHERE device_id=?", (f"photos:{which}",))
         db.x("DELETE FROM devices WHERE id=?", (f"photos:{which}",))
+        return {"ok": True}
+
+    # ------------------------------------------------------------- people
+    PERSON_PALETTE = ["#c8385a", "#1f78b4", "#e08e0b", "#7b4fbf", "#0f9d8a", "#b83dba", "#5b6b2e", "#d4622a"]
+
+    @app.get("/api/people")
+    def people():
+        colors = db.get_setting("person_colors", {})
+        owners = [r["owner"] for r in db.q("SELECT owner, MIN(first_seen) f FROM devices WHERE owner IS NOT NULL "
+                                           "AND source!='photos' GROUP BY owner ORDER BY f")]
+        out = []
+        for i, o in enumerate(owners):
+            out.append({"name": o, "color": colors.get(o) or PERSON_PALETTE[i % len(PERSON_PALETTE)]})
+        return out
+
+    @app.patch("/api/people/{name}")
+    def patch_person(name: str, body: dict = Body(...)):
+        colors = db.get_setting("person_colors", {})
+        if body.get("color"):
+            colors[name] = str(body["color"])
+        db.set_setting("person_colors", colors)
+        return {"ok": True}
+
+    @app.get("/api/digest")
+    def digest_preview():
+        from .alerts import build_digest
+        subj, body = build_digest(cfg)
+        return {"subject": subj, "body": body}
+
+    @app.post("/api/digest/send")
+    def digest_send():
+        from .alerts import build_digest
+        subj, body = build_digest(cfg)
+        err = alerter.send_email(subj, body)
+        if err:
+            raise HTTPException(502, err)
         return {"ok": True}
 
     # ------------------------------------------------------------- misc
