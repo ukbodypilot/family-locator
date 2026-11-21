@@ -1,0 +1,14 @@
+# family-locator config (gitignored). Defaults + every option: famloc/config.py
+port = 8790
+poll_seconds = 300      # read Apple's cached positions this often
+locate_minutes = 15     # ask devices for a FRESH fix this often (battery cost); 0 = never
+airtag_poll_minutes = 15
+low_battery_pct = 15
+stale_hours = 12
+
+[email]
+# Gmail address + an app password (https://myaccount.google.com/apppasswords).
+# The radio-gateway's EMAIL_* values in gateway_config.txt can be reused here.
+email_address = ""
+email_app_password = ""
+email_recipient = ""    # comma-separated; blank = email_address

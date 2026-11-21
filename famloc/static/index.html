@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Locator</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232563eb' d='M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/vendor/leaflet.css">
+<link rel="stylesheet" href="/static/vendor/MarkerCluster.css">
+<link rel="stylesheet" href="/static/vendor/MarkerCluster.Default.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<!-- ============ login / first-run ============ -->
+<div id="auth" class="auth hidden">
+  <form id="authForm" class="auth-card">
+    <div class="brand big"><span class="pin"></span>Family Locator</div>
+    <p id="authMsg" class="muted">Sign in</p>
+    <input id="authPw" type="password" autocomplete="current-password" placeholder="Password" required>
+    <input id="authPw2" type="password" autocomplete="new-password" placeholder="Repeat password" class="hidden">
+    <button class="btn primary" type="submit" id="authBtn">Sign in</button>
+    <p id="authErr" class="err"></p>
+  </form>
+</div>
+
+<!-- ============ app ============ -->
+<div id="app" class="app hidden">
+  <header class="topbar">
+    <button class="icon-btn" id="sideToggle" title="Toggle panel" aria-label="Toggle panel">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <div class="brand"><span class="pin"></span><span class="brand-text">Family Locator</span></div>
+    <div class="search">
+      <svg viewBox="0 0 24 24" class="search-ico"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input id="search" type="search" placeholder="Search people, places, addresses, or lat, lon" autocomplete="off">
+      <div id="searchResults" class="search-results hidden"></div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <button class="icon-btn" id="logoutBtn" title="Sign out" aria-label="Sign out">
+      <svg viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></svg>
+    </button>
+  </header>
+
+  <aside class="side" id="side">
+    <nav class="tabs" id="tabs">
+      <button data-tab="people" class="active">People</button>
+      <button data-tab="places">Places</button>
+      <button data-tab="insights">Insights</button>
+      <button data-tab="alerts">Alerts</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+    <section class="tab-body" data-body="people">
+      <div class="row between"><h3>Devices</h3>
+        <label class="mini"><input type="checkbox" id="showHidden"> show hidden</label></div>
+      <div id="deviceList" class="list"></div>
+    </section>
+    <section class="tab-body hidden" data-body="places">
+      <div class="row between"><h3>Places &amp; geofences</h3>
+        <button class="btn small primary" id="addPlaceBtn">+ Add place</button></div>
+      <p class="muted small">Alerts are emailed when a device enters or leaves a place. Click the map (or right-click → "Create place here") to set the centre.</p>
+      <form id="placeForm" class="card hidden">
+        <input type="hidden" id="pfId">
+        <label>Name <input id="pfName" required placeholder="Home, School, Work..."></label>
+        <div class="grid2">
+          <label>Lat <input id="pfLat" type="number" step="any" required></label>
+          <label>Lon <input id="pfLon" type="number" step="any" required></label>
+        </div>
+        <label>Radius <span id="pfRadiusVal">150 m</span>
+          <input id="pfRadius" type="range" min="25" max="3000" step="25" value="150"></label>
+        <div class="row gap">
+          <label class="mini"><input type="checkbox" id="pfEnter" checked> alert on arrive</label>
+          <label class="mini"><input type="checkbox" id="pfExit" checked> alert on leave</label>
+          <label class="mini">colour <input type="color" id="pfColor" value="#2563eb"></label>
+        </div>
+        <details><summary class="small">Only these devices (default: all)</summary><div id="pfDevices" class="checks"></div></details>
+        <div class="row gap end">
+          <button type="button" class="btn small danger hidden" id="pfDelete">Delete</button>
+          <button type="button" class="btn small" id="pfCancel">Cancel</button>
+          <button type="submit" class="btn small primary">Save</button>
+        </div>
+      </form>
+      <div id="placeList" class="list"></div>
+    </section>
+    <section class="tab-body hidden" data-body="insights">
+      <label>Device <select id="insDevice"></select></label>
+      <p class="muted small">For the time range selected in the timeline below.</p>
+      <div id="insBody"></div>
+    </section>
+    <section class="tab-body hidden" data-body="alerts">
+      <div class="row between"><h3>Events</h3>
+        <select id="evKind" class="small"><option value="">all</option><option>enter</option><option>exit</option>
+          <option>battery</option><option>stale</option><option>auth</option><option>info</option></select></div>
+      <div id="eventList" class="list"></div>
+    </section>
+    <section class="tab-body hidden" data-body="settings">
+      <div class="card" id="icloudCard">
+        <h3>iCloud Find My <span class="badge" id="icState">…</span></h3>
+        <p class="muted small" id="icDetail"></p>
+        <form id="icLogin" class="stack hidden">
+          <input id="icId" type="email" placeholder="Apple ID" autocomplete="username" required>
+          <input id="icPw" type="password" placeholder="Apple ID password (not stored)" autocomplete="current-password" required>
+          <button class="btn primary small">Sign in to iCloud</button>
+        </form>
+        <form id="ic2fa" class="stack hidden">
+          <input id="icCode" inputmode="numeric" placeholder="6-digit code" maxlength="8" required>
+          <div class="row gap"><button class="btn primary small">Verify</button>
+            <button type="button" class="btn small" id="icSms">Send by SMS instead</button></div>
+        </form>
+        <div class="row gap" id="icActions">
+          <button class="btn small" id="icPoll">Locate now</button>
+          <button class="btn small danger" id="icLogout">Sign out &amp; forget session</button>
+        </div>
+        <p class="muted small" id="icStats"></p>
+      </div>
+      <div class="card">
+        <h3>AirTags (FindMy.py) <span class="badge" id="atState">…</span></h3>
+        <p class="muted small" id="atDetail"></p>
+        <p class="muted small">Key files: <span id="atKeys"></span><br>Put the JSON files from <code>python -m findmy decrypt --out-dir keys</code> (run on a Mac) in <code id="atDir"></code>.</p>
+        <form id="atLogin" class="stack hidden">
+          <input id="atId" type="email" placeholder="Apple ID" autocomplete="username" required>
+          <input id="atPw" type="password" placeholder="Apple ID password (not stored)" required>
+          <button class="btn primary small">Sign in for AirTags</button>
+        </form>
+        <form id="at2fa" class="stack hidden">
+          <input id="atCode" inputmode="numeric" placeholder="6-digit code" required>
+          <button class="btn primary small">Verify</button>
+        </form>
+        <div class="row gap" id="atActions">
+          <button class="btn small" id="atPoll">Fetch now</button>
+          <button class="btn small danger" id="atLogout">Sign out</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Photo history import</h3>
+        <p class="muted small">Backfills past locations from photo GPS. Photo points never trigger alerts.</p>
+        <div class="row gap"><button class="btn small" id="phIcloud">Import from iCloud Photos</button></div>
+        <form id="phFolder" class="row gap">
+          <input id="phPath" placeholder="/path/to/photo/folder on this server" required>
+          <button class="btn small">Import folder</button>
+        </form>
+        <p class="muted small" id="phStatus"></p>
+      </div>
+      <div class="card">
+        <h3>Email alerts <span class="badge" id="emState">…</span></h3>
+        <p class="muted small" id="emDetail"></p>
+        <button class="btn small" id="emTest">Send test email</button>
+      </div>
+      <div class="card">
+        <h3>Web password</h3>
+        <form id="pwChange" class="stack">
+          <input id="pwOld" type="password" placeholder="Current password" autocomplete="current-password" required>
+          <input id="pwNew" type="password" placeholder="New password (8+)" autocomplete="new-password" required>
+          <button class="btn small">Change</button>
+        </form>
+      </div>
+      <p class="muted small" id="cfgLine"></p>
+    </section>
+  </aside>
+
+  <main class="mapwrap">
+    <div id="map"></div>
+    <div id="ctxMenu" class="ctx hidden"></div>
+    <div id="toast" class="toast hidden"></div>
+  </main>
+
+  <footer class="timebar" id="timebar">
+    <div class="tb-row">
+      <div class="seg" id="presets">
+        <button data-p="live" class="active" title="Last 24 h, follows now">Live</button>
+        <button data-p="1h">1h</button><button data-p="6h">6h</button><button data-p="24h">24h</button>
+        <button data-p="7d">7d</button><button data-p="30d">30d</button><button data-p="1y">1y</button>
+        <button data-p="all">All</button>
+      </div>
+      <button class="icon-btn sm hidden" id="moreBtn" title="Custom range">⋯</button>
+      <div class="range-inputs">
+        <input type="datetime-local" id="tFrom" aria-label="From"><span>→</span>
+        <input type="datetime-local" id="tTo" aria-label="To">
+        <button class="btn small" id="tApply">Go</button>
+        <button class="icon-btn sm" id="tPrev" title="Shift range back">‹</button>
+        <button class="icon-btn sm" id="tNext" title="Shift range forward">›</button>
+      </div>
+    </div>
+    <div class="tb-row">
+      <button class="icon-btn play" id="playBtn" title="Play / pause" aria-label="Play">
+        <svg viewBox="0 0 24 24" id="playIco"><path d="M7 5l12 7-12 7z"/></svg>
+      </button>
+      <select id="speed" title="Playback speed">
+        <option value="60">1 min/s</option><option value="600">10 min/s</option>
+        <option value="3600" selected>1 h/s</option><option value="21600">6 h/s</option>
+        <option value="86400">1 day/s</option><option value="604800">1 wk/s</option>
+      </select>
+      <div class="scrub">
+        <canvas id="histo"></canvas>
+        <input type="range" id="scrub" min="0" max="1000" value="1000">
+      </div>
+      <div class="tlabel"><b id="tNow">—</b><small id="tSpan"></small></div>
+      <select id="trail" title="Track trail behind the cursor">
+        <option value="0">full trail</option><option value="3600">1 h trail</option>
+        <option value="21600">6 h trail</option><option value="86400">24 h trail</option>
+      </select>
+    </div>
+  </footer>
+</div>
+
+<script src="/static/vendor/leaflet.js"></script>
+<script src="/static/vendor/leaflet.markercluster.js"></script>
+<script src="/static/vendor/leaflet-heat.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

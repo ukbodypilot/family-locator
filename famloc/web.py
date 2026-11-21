@@ -1,0 +1,328 @@
+"""FastAPI app: UI-password auth, JSON API, static map UI."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import logging
+import secrets
+import time
+from collections import defaultdict
+from pathlib import Path
+
+from fastapi import Body, FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
+
+from . import __version__, analysis, db, geocode
+from .alerts import COUNTERS as ALERT_COUNTERS
+
+log = logging.getLogger("famloc.web")
+STATIC = Path(__file__).resolve().parent / "static"
+COOKIE = "famloc_session"
+SESSION_DAYS = 30
+OPEN_PATHS = {"/", "/api/auth/state", "/api/auth/login", "/api/auth/setup", "/metrics", "/favicon.ico"}
+
+_fails: dict[str, list[float]] = defaultdict(list)
+
+
+def _hash(pw: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 300_000).hex()
+
+
+def _password_set() -> bool:
+    return db.get_setting("ui_password") is not None
+
+
+def _check_password(pw: str) -> bool:
+    rec = db.get_setting("ui_password")
+    if not rec:
+        return False
+    return hmac.compare_digest(_hash(pw, bytes.fromhex(rec["salt"])), rec["hash"])
+
+
+def _new_session(resp: Response) -> None:
+    tok = secrets.token_urlsafe(32)
+    db.x("INSERT INTO web_sessions(token,expires) VALUES(?,?)", (tok, time.time() + SESSION_DAYS * 86400))
+    db.x("DELETE FROM web_sessions WHERE expires<?", (time.time(),))
+    resp.set_cookie(COOKIE, tok, max_age=SESSION_DAYS * 86400, httponly=True, samesite="strict")
+
+
+def _authed(req: Request) -> bool:
+    tok = req.cookies.get(COOKIE)
+    if not tok:
+        return False
+    r = db.q1("SELECT expires FROM web_sessions WHERE token=?", (tok,))
+    return bool(r and r["expires"] > time.time())
+
+
+def _throttled(ip: str) -> bool:
+    now = time.time()
+    _fails[ip] = [t for t in _fails[ip] if now - t < 300]
+    return len(_fails[ip]) >= 5
+
+
+def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
+    app = FastAPI(title="Family Locator", version=__version__, docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def auth_mw(request: Request, call_next):
+        p = request.url.path
+        if p in OPEN_PATHS or p.startswith("/static/"):
+            return await call_next(request)
+        if not _authed(request):
+            return JSONResponse({"error": "auth required"}, status_code=401)
+        return await call_next(request)
+
+    # ------------------------------------------------------------- auth
+    @app.get("/api/auth/state")
+    def auth_state(request: Request):
+        return {"password_set": _password_set(), "authed": _authed(request), "version": __version__}
+
+    @app.post("/api/auth/setup")
+    def auth_setup(response: Response, body: dict = Body(...)):
+        if _password_set():
+            raise HTTPException(403, "password already set")
+        pw = str(body.get("password", ""))
+        if len(pw) < 8:
+            raise HTTPException(400, "use at least 8 characters")
+        salt = secrets.token_bytes(16)
+        db.set_setting("ui_password", {"salt": salt.hex(), "hash": _hash(pw, salt)})
+        _new_session(response)
+        return {"ok": True}
+
+    @app.post("/api/auth/login")
+    def auth_login(request: Request, response: Response, body: dict = Body(...)):
+        ip = request.client.host if request.client else "?"
+        if _throttled(ip):
+            log.warning("[WebAccess] throttled login from %s", ip)
+            raise HTTPException(429, "too many attempts, wait 5 minutes")
+        if not _check_password(str(body.get("password", ""))):
+            _fails[ip].append(time.time())
+            log.warning("[WebAccess] failed login from %s", ip)
+            raise HTTPException(401, "wrong password")
+        log.info("[WebAccess] login from %s", ip)
+        _new_session(response)
+        return {"ok": True}
+
+    @app.post("/api/auth/logout")
+    def auth_logout(request: Request, response: Response):
+        db.x("DELETE FROM web_sessions WHERE token=?", (request.cookies.get(COOKIE, ""),))
+        response.delete_cookie(COOKIE)
+        return {"ok": True}
+
+    @app.post("/api/auth/change")
+    def auth_change(body: dict = Body(...)):
+        if not _check_password(str(body.get("old", ""))):
+            raise HTTPException(401, "wrong current password")
+        pw = str(body.get("new", ""))
+        if len(pw) < 8:
+            raise HTTPException(400, "use at least 8 characters")
+        salt = secrets.token_bytes(16)
+        db.set_setting("ui_password", {"salt": salt.hex(), "hash": _hash(pw, salt)})
+        return {"ok": True}
+
+    # ------------------------------------------------------------- data
+    @app.get("/api/devices")
+    def devices():
+        rows = db.q("SELECT d.*, (SELECT COUNT(*) FROM points p WHERE p.device_id=d.id) AS n_points "
+                    "FROM devices d ORDER BY d.source, d.owner, d.name")
+        for r in rows:
+            r["meta"] = json.loads(r["meta"] or "{}")
+            last = db.q1("SELECT ts,lat,lon,acc,kind FROM points WHERE device_id=? ORDER BY ts DESC LIMIT 1",
+                         (r["id"],))
+            r["last"] = last
+        return rows
+
+    @app.patch("/api/devices/{dev_id:path}")
+    def patch_device(dev_id: str, body: dict = Body(...)):
+        for k in ("name", "color", "hidden"):
+            if k in body:
+                db.x(f"UPDATE devices SET {k}=? WHERE id=?", (body[k], dev_id))
+        return {"ok": True}
+
+    @app.get("/api/points")
+    def get_points(start: float, end: float, devices: str = "", max_acc: float = 0, limit: int = 200000):
+        sql = "SELECT device_id,ts,lat,lon,acc,alt,battery,kind,meta FROM points WHERE ts BETWEEN ? AND ?"
+        args: list = [start, end]
+        ids = [d for d in devices.split(",") if d]
+        if ids:
+            sql += f" AND device_id IN ({','.join('?' * len(ids))})"
+            args += ids
+        if max_acc:
+            sql += " AND (acc IS NULL OR acc<=?)"
+            args.append(max_acc)
+        rows = db.q(sql + " ORDER BY ts LIMIT ?", args + [limit])
+        out: dict[str, list] = {}
+        for r in rows:  # compact columnar-ish form: [ts, lat, lon, acc, battery, kind, meta]
+            out.setdefault(r["device_id"], []).append(
+                [r["ts"], round(r["lat"], 6), round(r["lon"], 6), r["acc"], r["battery"], r["kind"],
+                 json.loads(r["meta"]) if r["meta"] else None])
+        return {"start": start, "end": end, "truncated": len(rows) >= limit, "points": out}
+
+    @app.get("/api/range")
+    def data_range():
+        return db.q1("SELECT MIN(ts) AS first, MAX(ts) AS last, COUNT(*) AS n FROM points")
+
+    @app.get("/api/analysis")
+    def get_analysis(device: str, start: float, end: float):
+        return analysis.summary(device, start, end, cfg.stay_radius_m, cfg.stay_min_minutes)
+
+    # ------------------------------------------------------------- geofences
+    @app.get("/api/geofences")
+    def list_fences():
+        rows = db.q("SELECT * FROM geofences ORDER BY name")
+        for r in rows:
+            r["devices"] = json.loads(r["devices"]) if r["devices"] else []
+            r["inside"] = [s["device_id"] for s in
+                           db.q("SELECT device_id FROM fence_state WHERE geofence_id=? AND inside=1", (r["id"],))]
+        return rows
+
+    def _fence_args(b: dict):
+        return (str(b["name"]), float(b["lat"]), float(b["lon"]), max(20.0, float(b.get("radius", 150))),
+                b.get("color") or "#2563eb", int(bool(b.get("on_enter", True))),
+                int(bool(b.get("on_exit", True))), json.dumps(b.get("devices") or []))
+
+    @app.post("/api/geofences")
+    def add_fence(body: dict = Body(...)):
+        cur = db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices) "
+                   "VALUES(?,?,?,?,?,?,?,?)", _fence_args(body))
+        return {"id": cur.lastrowid}
+
+    @app.put("/api/geofences/{gid}")
+    def put_fence(gid: int, body: dict = Body(...)):
+        db.x("UPDATE geofences SET name=?,lat=?,lon=?,radius=?,color=?,on_enter=?,on_exit=?,devices=? WHERE id=?",
+             (*_fence_args(body), gid))
+        db.x("DELETE FROM fence_state WHERE geofence_id=?", (gid,))  # re-learn silently after a move
+        return {"ok": True}
+
+    @app.delete("/api/geofences/{gid}")
+    def del_fence(gid: int):
+        db.x("DELETE FROM fence_state WHERE geofence_id=?", (gid,))
+        db.x("DELETE FROM geofences WHERE id=?", (gid,))
+        return {"ok": True}
+
+    # ------------------------------------------------------------- events / status
+    @app.get("/api/events")
+    def events(limit: int = 200, kind: str = ""):
+        if kind:
+            return db.q("SELECT * FROM events WHERE kind=? ORDER BY ts DESC LIMIT ?", (kind, limit))
+        return db.q("SELECT * FROM events ORDER BY ts DESC LIMIT ?", (limit,))
+
+    @app.get("/api/status")
+    def status():
+        return {"version": __version__, "icloud": icloud.status(), "airtag": airtag.status(),
+                "photos": photos.status(), "email": {"configured": alerter.email_configured(),
+                                                     "recipient": cfg.email_recipient, **ALERT_COUNTERS},
+                "config": {k: getattr(cfg, k) for k in ("poll_seconds", "locate_minutes", "airtag_poll_minutes",
+                                                        "low_battery_pct", "stale_hours", "stay_radius_m",
+                                                        "stay_min_minutes", "with_family")}}
+
+    @app.get("/metrics")
+    def metrics():
+        lines = []
+        for src, st in (("icloud", icloud.status()), ("airtag", airtag.status())):
+            lines.append(f'famloc_source_ok{{source="{src}"}} {1 if st["state"] == "ok" else 0}')
+            for k in ("polls", "poll_errors", "new_points"):
+                lines.append(f'famloc_{k}_total{{source="{src}"}} {st[k]}')
+            lines.append(f'famloc_last_poll_timestamp{{source="{src}"}} {st["last_poll"]}')
+        for k, v in ALERT_COUNTERS.items():
+            lines.append(f"famloc_{k}_total {v}")
+        n = db.q1("SELECT COUNT(*) AS n FROM points")["n"]
+        lines.append(f"famloc_points {n}")
+        return PlainTextResponse("\n".join(lines) + "\n")
+
+    # ------------------------------------------------------------- iCloud
+    @app.post("/api/icloud/login")
+    def icloud_login(body: dict = Body(...)):
+        return icloud.login(str(body["apple_id"]).strip(), str(body["password"]))
+
+    @app.post("/api/icloud/2fa")
+    def icloud_2fa(body: dict = Body(...)):
+        return icloud.submit_2fa(str(body["code"]))
+
+    @app.post("/api/icloud/sms")
+    def icloud_sms():
+        return icloud.request_sms()
+
+    @app.post("/api/icloud/logout")
+    def icloud_logout():
+        return icloud.logout()
+
+    @app.post("/api/icloud/poll")
+    def icloud_poll(locate: bool = True):
+        if icloud.state != "ok":
+            raise HTTPException(409, f"iCloud state is {icloud.state}")
+        icloud.poll_once(force_locate=locate)
+        return icloud.status()
+
+    # ------------------------------------------------------------- AirTags
+    @app.post("/api/airtag/login")
+    def airtag_login(body: dict = Body(...)):
+        return airtag.login(str(body["apple_id"]).strip(), str(body["password"]))
+
+    @app.post("/api/airtag/2fa")
+    def airtag_2fa(body: dict = Body(...)):
+        return airtag.submit_2fa(str(body["code"]))
+
+    @app.post("/api/airtag/logout")
+    def airtag_logout():
+        return airtag.logout()
+
+    @app.post("/api/airtag/poll")
+    def airtag_poll():
+        if airtag.state != "ok":
+            raise HTTPException(409, f"AirTag state is {airtag.state}")
+        airtag.poll_once()
+        return airtag.status()
+
+    # ------------------------------------------------------------- photos
+    @app.post("/api/photos/icloud")
+    def photos_icloud(body: dict = Body(default={})):
+        try:
+            svc = icloud.photos_service()
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(409, str(e)) from e
+        return photos.start_icloud(svc, body.get("owner"), int(body.get("limit") or 0))
+
+    @app.post("/api/photos/folder")
+    def photos_folder(body: dict = Body(...)):
+        return photos.start_folder(str(body["path"]), body.get("owner"))
+
+    @app.delete("/api/photos/{which}")
+    def photos_delete(which: str):
+        if which not in ("icloud", "folder"):
+            raise HTTPException(404)
+        db.x("DELETE FROM points WHERE device_id=?", (f"photos:{which}",))
+        db.x("DELETE FROM devices WHERE id=?", (f"photos:{which}",))
+        return {"ok": True}
+
+    # ------------------------------------------------------------- misc
+    @app.post("/api/email/test")
+    def email_test():
+        err = alerter.send_email("Test email", "This is a test from Family Locator.")
+        if err:
+            raise HTTPException(502, err)
+        return {"ok": True, "to": cfg.email_recipient}
+
+    @app.get("/api/geocode")
+    def api_geocode(q: str, lat: float | None = None, lon: float | None = None):
+        try:
+            return geocode.search(cfg.nominatim_url, q, (lat, lon) if lat is not None and lon is not None else None)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"geocoder: {e}") from e
+
+    @app.get("/api/reverse")
+    def api_reverse(lat: float, lon: float):
+        try:
+            return geocode.reverse(cfg.nominatim_url, lat, lon)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"geocoder: {e}") from e
+
+    @app.get("/")
+    def index():
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    return app

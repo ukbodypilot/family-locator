@@ -1,0 +1,6 @@
+pyicloud>=2026.11.2
+FindMy>=0.10.2
+fastapi>=0.120
+uvicorn>=0.30
+pillow>=11
+requests>=2.31

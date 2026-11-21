@@ -1,0 +1,14 @@
+[Unit]
+Description=Family Locator (iCloud Find My history, geofence alerts, map UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/Downloads/family-locator
+ExecStart=%h/Downloads/family-locator/.venv/bin/python -m famloc.main
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
