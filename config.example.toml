@@ -6,7 +6,7 @@ port = 8790
 
 [tracking]
 poll_seconds = 300        # (UI) read the positions Apple already has, this often
-locate_minutes = 15       # (UI) ask devices for a fresh fix this often; 0 = never (uses battery)
+locate_minutes = 15       # (UI) default fresh-location interval per person; 0 = never, minimum 1
 airtag_poll_minutes = 15  # (UI)
 
 [alerts]

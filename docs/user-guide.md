@@ -156,7 +156,7 @@ changed on the Setup tab.
 
 - **iCloud Find My:** sign in or out, the status of polling, and **Locate everyone now**.
 - **Open on your phone:** the current outside link and the home link.
-- **Tracking:** a row per person, with **Fresh location** (Default, 2 min to 1 hour, or Never) and
+- **Tracking:** a row per person, with **Fresh location** (Default, 1 min to 1 hour, or Never) and
   **Follow while moving** (Default, On, Off), and when their next fresh location is due. Below it
   are the global settings. See [Tracking and following](tracking.md).
 - **AirTags,** **Past locations from photos,** **Email** (with **Send a test email**) and the

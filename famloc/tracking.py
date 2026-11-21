@@ -51,7 +51,7 @@ class Tracker:
                 cur.pop("locate_minutes", None)
             else:
                 v = int(locate_minutes)
-                cur["locate_minutes"] = 0 if v <= 0 else max(2, min(1440, v))
+                cur["locate_minutes"] = 0 if v <= 0 else max(1, min(1440, v))
         if follow != "keep":
             if follow is None:
                 cur.pop("follow", None)

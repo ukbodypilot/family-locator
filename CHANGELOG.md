@@ -2,6 +2,17 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.3.0] -- 2026-11-21
+
+- **Faster tracking allowed.** A person's fresh-location interval can now be as short as 1 minute
+  (was 2), and following can run as often as every 30 seconds (was 1 minute). The menus gain a
+  1-minute option, and intervals under a minute show as seconds, e.g. "every 30 s".
+- **More accurate wording on cost.** The app and docs now say it plainly: reading Apple's stored
+  positions doesn't involve the phones at all. A fresh location is one push message over the
+  connection the phone already holds, plus one quick fix, the same as selecting someone in Find My.
+  The "uses battery" warnings were overstated and are gone. See
+  [What it costs the phones](docs/tracking.md#what-it-costs-the-phones).
+
 ## [1.2.0] -- 2026-11-21
 
 - **Per-person tracking.** Each person has their own fresh-location interval (Default, 2 min to 1

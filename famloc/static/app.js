@@ -56,6 +56,7 @@ function ago(ts) {
   if (s < 2 * D) return `${(s / H).toFixed(s < 10 * H ? 1 : 0)} h ago`;
   return `${Math.round(s / D)} days ago`;
 }
+const fmtMin = (m) => (m < 1 ? `${Math.round(m * 60)} s` : `${+(+m).toFixed(1)} min`);
 function dur(min) {
   if (min < 60) return `${Math.round(min)} min`;
   if (min < 48 * 60) return `${(min / 60).toFixed(1)} h`;
@@ -643,7 +644,7 @@ function followBadge(p) {
   const t = p.tracking || {};
   if (!t.following || !S.follow) return "";
   const why = t.following === "manual" ? "Following" : "Moving, following";
-  return `<span class="follow-badge" title="${t.following_until ? "Until " + esc(clock(t.following_until)) : ""}">${why}, every ${t.effective_minutes} min</span>`;
+  return `<span class="follow-badge" title="${t.following_until ? "Until " + esc(clock(t.following_until)) : ""}">${why}, every ${fmtMin(t.effective_minutes)}</span>`;
 }
 function renderPeople() {
   const el = $("#peopleList"); el.innerHTML = "";
@@ -739,7 +740,7 @@ function personMenu(p, btn) {
 async function followPerson(p, minutes) {
   try {
     await api(`/api/people/${encodeURIComponent(p.name)}/follow`, { method: "POST", body: { minutes } });
-    toast(minutes ? `Following ${p.display}: a fresh location every ${S.cfgMoving || 2} min for ${minutes} min.` : `Stopped following ${p.display}.`, 5000);
+    toast(minutes ? `Following ${p.display}: a fresh location every ${fmtMin(S.cfgMoving || 2)} for ${minutes} min.` : `Stopped following ${p.display}.`, 5000);
     await refreshAll();
   } catch (e) { toast(e.message, 6000); }
 }
@@ -748,7 +749,7 @@ async function loadTrackingTable() {
   const def = rows.find((r) => r.key === "locate_minutes")?.value ?? 15;
   const followDef = !!rows.find((r) => r.key === "follow_moving")?.value;
   S.cfgMoving = rows.find((r) => r.key === "moving_locate_minutes")?.value ?? 2;
-  const ivOpts = (cur) => [["", `Default (${def ? def + " min" : "never"})`], ["2", "2 min"], ["5", "5 min"], ["10", "10 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 hour"], ["0", "Never"]]
+  const ivOpts = (cur) => [["", `Default (${def ? fmtMin(def) : "never"})`], ["1", "1 min"], ["2", "2 min"], ["5", "5 min"], ["10", "10 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 hour"], ["0", "Never"]]
     .map(([v, l]) => `<option value="${v}" ${String(cur ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
   const fOpts = (cur) => [["", `Default (${followDef ? "on" : "off"})`], ["1", "On"], ["0", "Off"]]
     .map(([v, l]) => `<option value="${v}" ${(cur == null ? "" : cur ? "1" : "0") === v ? "selected" : ""}>${l}</option>`).join("");
@@ -756,7 +757,7 @@ async function loadTrackingTable() {
   el.innerHTML = `<span class="h">Person</span><span class="h">Fresh location</span><span class="h">Follow while moving</span>` +
     S.people.map((p) => {
       const t = p.tracking || {};
-      const st = t.following ? `<div class="st on">${t.following === "manual" ? "Following" : "Moving: following"} every ${t.effective_minutes} min${t.following_until ? ` until about ${esc(clock(t.following_until))}` : ""}</div>`
+      const st = t.following ? `<div class="st on">${t.following === "manual" ? "Following" : "Moving: following"} every ${fmtMin(t.effective_minutes)}${t.following_until ? ` until about ${esc(clock(t.following_until))}` : ""}</div>`
         : t.next_locate ? `<div class="st">Next fresh location around ${esc(clock(t.next_locate))}</div>` : `<div class="st">No fresh locations requested</div>`;
       return `<span>${esc(p.display)}</span>
         <select data-p="${esc(p.name)}" data-k="locate_minutes" aria-label="Fresh location interval for ${esc(p.display)}">${ivOpts(t.locate_minutes)}</select>
@@ -1060,7 +1061,7 @@ async function loadConfigForms() {
     ${field(r)}</label>`).join("") +
     `<div class="row gap end"><span class="muted small" style="margin-right:auto">${note}</span><button class="btn small primary">Save settings</button></div>`;
   $("#alertCfg").innerHTML = html(ALERT_KEYS, "Hours are 0 to 23, local time.");
-  $("#trackCfg").innerHTML = html(TRACK_KEYS, "Fresh fixes wake family devices and use battery.");
+  $("#trackCfg").innerHTML = html(TRACK_KEYS, "Reading is free for the phones. A fresh location is one quick fix on the phone.");
 }
 for (const id of ["alertCfg", "trackCfg"]) $("#" + id).addEventListener("submit", (e) => {
   e.preventDefault();

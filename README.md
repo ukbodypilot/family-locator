@@ -55,7 +55,7 @@ walkthrough, including running it as a service, is in [Getting started](docs/get
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, first sign-in, adding places, running as a service |
 | [Using the app](docs/user-guide.md) | People, map, timeline, search, places, insights, every control |
-| [Tracking and following](docs/tracking.md) | Per-person intervals, following people while they move, battery |
+| [Tracking and following](docs/tracking.md) | Per-person intervals, following people while they move, what it costs |
 | [Alerts and the daily summary](docs/alerts.md) | What triggers an email, per-person rules, quiet hours |
 | [Phone access](docs/phone-access.md) | Using it from anywhere through the radio gateway's tunnel |
 | [AirTags and photo history](docs/airtags-and-photos.md) | FindMy.py keys, importing past locations from photos |

@@ -26,9 +26,9 @@ inside any `[section]`; sections are only for readability.
 | Key | Default | UI | Meaning |
 |---|---|---|---|
 | `poll_seconds` | 300 | yes | How often to read the positions Apple already has (60–3600 s). Costs nothing on the devices. |
-| `locate_minutes` | 15 | yes | Default fresh-location interval per person (0 = never, at least 2). Each person can override it. Wakes the phone and uses some battery. |
+| `locate_minutes` | 15 | yes | Default fresh-location interval per person (0 = never, at least 1). Each person can override it. |
 | `follow_moving` | true | yes | Follow people while they move (each person can override it). |
-| `moving_locate_minutes` | 2 | yes | Fresh-location interval while following (1–15 min). |
+| `moving_locate_minutes` | 2 | yes | Fresh-location interval while following (0.5–15 min; 0.5 = every 30 seconds). |
 | `follow_rest_minutes` | 10 | yes | Stop following after no movement for this long. |
 | `follow_max_hours` | 4 | yes | Longest single follow. |
 | `movement_threshold_m` | 250 | yes | How far apart two fixes must be to count as moving (also beyond their combined accuracy). |

@@ -113,8 +113,10 @@ def test_tracker_intervals_and_overrides():
     t.set_person("Gran", locate_minutes=0)
     assert t.interval_minutes("Kid", 0) == 5 and t.interval_minutes("Other", 0) == 15
     assert t.due(["Gran"], 1000) == []            # never
-    t.set_person("Kid", locate_minutes=1)          # clamped to the 2-minute floor
-    assert t.person_settings("Kid")["locate_minutes"] == 2
+    t.set_person("Kid", locate_minutes=1)          # 1 minute is allowed
+    assert t.person_settings("Kid")["locate_minutes"] == 1
+    t.set_person("Kid", locate_minutes=0.5)        # below a minute rounds down to never
+    assert t.person_settings("Kid")["locate_minutes"] == 0
     t.set_person("Kid", locate_minutes=None)       # back to the default
     assert "locate_minutes" not in t.person_settings("Kid")
     db.set_setting("person_tracking", {})
@@ -255,6 +257,15 @@ def test_tracker_devices_never_compared_with_each_other():
     assert t.on_fixes("Me", [ipad_rest, phone_parked[:3]], 2300)      # iPad at rest, but phone moved in window
     ipad_rest2 = [(1700 + k * 120, 40.0, -100.0, 10) for k in range(0, 9)]    # ..2660
     assert not t.on_fixes("Me", [ipad_rest2, phone_parked], 2720)     # phone's window now clear: stop
+
+
+def test_config_floors():
+    c = config.Config()
+    got = config.apply_overrides(c, {"locate_minutes": 0.4, "moving_locate_minutes": 0.1})
+    assert got["locate_minutes"] == 1 or got["locate_minutes"] == 0  # int(0.4) -> 0 = never
+    assert got["moving_locate_minutes"] == 0.5
+    got = config.apply_overrides(c, {"locate_minutes": 1, "moving_locate_minutes": 0.5})
+    assert got == {"locate_minutes": 1, "moving_locate_minutes": 0.5}
 
 
 if __name__ == "__main__":
