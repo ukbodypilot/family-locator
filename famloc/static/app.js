@@ -75,7 +75,7 @@ $("#authForm").addEventListener("submit", async (e) => {
 $("#logoutBtn").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); location.reload(); };
 
 /* ---------------- map + base layers ---------------- */
-const map = L.map("map", { zoomControl: false, preferCanvas: true, worldCopyJump: true }).setView(store.get("view", [39.5, -98.35]), store.get("zoom", 4));
+const map = L.map("map", { zoomControl: false, maxZoom: 22, preferCanvas: true, worldCopyJump: true }).setView(store.get("view", [39.5, -98.35]), store.get("zoom", 4));
 L.control.zoom({ position: "topright" }).addTo(map);
 L.control.scale({ position: "bottomright", imperial: true }).addTo(map);
 const canvasR = L.canvas({ padding: 0.3 });
@@ -83,31 +83,33 @@ const canvasR = L.canvas({ padding: 0.3 });
 const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const esriAttr = "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, USDA, USGS, AeroGRID, IGN, GIS User Community";
 const esri = (svc) => `https://server.arcgisonline.com/ArcGIS/rest/services/${svc}/MapServer/tile/{z}/{y}/{x}`;
+const MAXZ = 22; // overzoom: past a layer's native level Leaflet scales up its last real tiles
 const BASES = {
-  "Streets (OSM)": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: osmAttr }),
-  "Streets (Esri)": L.tileLayer(esri("World_Street_Map"), { maxZoom: 19, attribution: esriAttr }),
-  "Light grey": L.layerGroup([
-    L.tileLayer(esri("Canvas/World_Light_Gray_Base"), { maxZoom: 16, maxNativeZoom: 16, attribution: esriAttr }),
-    L.tileLayer(esri("Canvas/World_Light_Gray_Reference"), { maxZoom: 16, maxNativeZoom: 16 }),
+  "Streets (OSM)": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, attribution: osmAttr }),
+  "Streets (Esri)": L.tileLayer(esri("World_Street_Map"), { maxZoom: MAXZ, maxNativeZoom: 19, attribution: esriAttr }),
+  "Dark streets (OSM)": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, attribution: osmAttr, className: "tiles-dark" }),
+  "Light grey (≤z16)": L.layerGroup([
+    L.tileLayer(esri("Canvas/World_Light_Gray_Base"), { maxZoom: MAXZ, maxNativeZoom: 16, attribution: esriAttr }),
+    L.tileLayer(esri("Canvas/World_Light_Gray_Reference"), { maxZoom: MAXZ, maxNativeZoom: 16 }),
   ]),
-  "Dark grey": L.layerGroup([
-    L.tileLayer(esri("Canvas/World_Dark_Gray_Base"), { maxZoom: 16, maxNativeZoom: 16, attribution: esriAttr }),
-    L.tileLayer(esri("Canvas/World_Dark_Gray_Reference"), { maxZoom: 16, maxNativeZoom: 16 }),
+  "Dark grey (≤z16)": L.layerGroup([
+    L.tileLayer(esri("Canvas/World_Dark_Gray_Base"), { maxZoom: MAXZ, maxNativeZoom: 16, attribution: esriAttr }),
+    L.tileLayer(esri("Canvas/World_Dark_Gray_Reference"), { maxZoom: MAXZ, maxNativeZoom: 16 }),
   ]),
-  "Satellite": L.tileLayer(esri("World_Imagery"), { maxZoom: 19, attribution: esriAttr }),
+  "Satellite": L.tileLayer(esri("World_Imagery"), { maxZoom: MAXZ, maxNativeZoom: 19, attribution: esriAttr }),
   "Hybrid (satellite + labels)": L.layerGroup([
-    L.tileLayer(esri("World_Imagery"), { maxZoom: 19, attribution: esriAttr }),
-    L.tileLayer(esri("Reference/World_Boundaries_and_Places"), { maxZoom: 19 }),
-    L.tileLayer(esri("Reference/World_Transportation"), { maxZoom: 19, opacity: 0.8 }),
+    L.tileLayer(esri("World_Imagery"), { maxZoom: MAXZ, maxNativeZoom: 19, attribution: esriAttr }),
+    L.tileLayer(esri("Reference/World_Boundaries_and_Places"), { maxZoom: MAXZ, maxNativeZoom: 19 }),
+    L.tileLayer(esri("Reference/World_Transportation"), { maxZoom: MAXZ, maxNativeZoom: 19, opacity: 0.8 }),
   ]),
-  "Topographic (Esri)": L.tileLayer(esri("World_Topo_Map"), { maxZoom: 19, attribution: esriAttr }),
-  "Terrain (OpenTopoMap)": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17, attribution: osmAttr + ', SRTM | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)' }),
-  "Cycling (CyclOSM)": L.tileLayer("https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png", { maxZoom: 20, attribution: osmAttr + ' | <a href="https://www.cyclosm.org">CyclOSM</a>' }),
-  "Humanitarian": L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { maxZoom: 19, attribution: osmAttr + " | Humanitarian OSM Team" }),
+  "Topographic (Esri)": L.tileLayer(esri("World_Topo_Map"), { maxZoom: MAXZ, maxNativeZoom: 19, attribution: esriAttr }),
+  "Terrain (OpenTopoMap)": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 17, attribution: osmAttr + ', SRTM | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)' }),
+  "Cycling (CyclOSM)": L.tileLayer("https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 20, attribution: osmAttr + ' | <a href="https://www.cyclosm.org">CyclOSM</a>' }),
+  "Humanitarian": L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, attribution: osmAttr + " | Humanitarian OSM Team" }),
 };
 const darkPref = matchMedia("(prefers-color-scheme: dark)").matches;
-let baseName = store.get("base", darkPref ? "Dark grey" : "Streets (OSM)");
-if (!BASES[baseName]) baseName = "Streets (OSM)";
+let baseName = store.get("base", darkPref ? "Dark streets (OSM)" : "Streets (OSM)");
+if (!BASES[baseName]) baseName = darkPref ? "Dark streets (OSM)" : "Streets (OSM)";
 BASES[baseName].addTo(map);
 
 const L_tracks = L.layerGroup().addTo(map);

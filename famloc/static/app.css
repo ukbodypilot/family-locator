@@ -182,3 +182,6 @@ details.nofix > summary { cursor: pointer; font-size: 12px; color: var(--muted);
 details.nofix > summary::before { content: "▸ "; } details.nofix[open] > summary::before { content: "▾ "; }
 .dev .tools button.spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* sharp dark basemap: OSM tiles inverted, hue rotated back so water stays blue-ish */
+.tiles-dark { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9) saturate(.6); }
