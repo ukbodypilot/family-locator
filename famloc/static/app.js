@@ -1,4 +1,6 @@
-/* Family Locator UI - vanilla JS + Leaflet. */
+/* Family Locator UI - vanilla JS + Leaflet.
+   Model: people (device owners) are the primary objects. Each person's position at a time is the
+   freshest fix from a carried device (iPhone preferred, then Watch, iPad). Devices sit underneath. */
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -6,47 +8,99 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const store = {
   get(k, d) { try { const v = localStorage.getItem("famloc." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
-  set(k, v) { try { localStorage.setItem("famloc." + k, JSON.stringify(v)); } catch { /* private mode */ } },
+  set(k, v) { try { localStorage.setItem("famloc." + k, JSON.stringify(v)); } catch { /* storage blocked */ } },
 };
-const H = 3600, D = 86400, GAP_BREAK = 6 * H;
+const H = 3600, D = 86400, GAP_BREAK = 6 * H, LANE_GAP = 3 * H;
+const isPhone = () => innerWidth < 820;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 async function api(path, opts = {}) {
   const o = { headers: {}, ...opts };
   if (o.body && typeof o.body !== "string") { o.body = JSON.stringify(o.body); o.headers["Content-Type"] = "application/json"; }
   const r = await fetch(path, o);
-  if (r.status === 401 && !path.startsWith("/api/auth")) { showAuth(); throw new Error("auth required"); }
+  if (r.status === 401 && !path.startsWith("/api/auth")) { showAuth(); throw new Error("Signed out. Sign in again."); }
   const ct = r.headers.get("content-type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
   if (!r.ok) throw new Error((data && data.detail) || (data && data.error) || r.statusText);
   return data;
 }
-
-function toast(msg, ms = 3000) {
+function toast(msg, ms = 3500) {
   const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden");
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), ms);
 }
 
-/* ---------------- time formatting ---------------- */
-const fmtDT = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+/* ---------------- formatting ---------------- */
+const fmtDT = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const fmtDTY = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const fmtT = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 const fmtD = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" });
-const dt = (ts) => (ts ? fmtDT.format(new Date(ts * 1000)) : "—");
+const fmtWD = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric" });
+const now = () => Date.now() / 1000;
+const dt = (ts) => {
+  if (!ts) return "never";
+  const d = new Date(ts * 1000), n = new Date();
+  return (d.getFullYear() === n.getFullYear() ? fmtDT : fmtDTY).format(d);
+};
+const sameDay = (a, b) => new Date(a * 1000).toDateString() === new Date(b * 1000).toDateString();
+const clock = (ts, ref = now()) => (sameDay(ts, ref) ? fmtT.format(new Date(ts * 1000)) : dt(ts));
 function ago(ts) {
   if (!ts) return "never";
-  const s = Date.now() / 1000 - ts;
+  const s = now() - ts;
   if (s < 90) return "just now";
   if (s < H) return `${Math.round(s / 60)} min ago`;
   if (s < 2 * D) return `${(s / H).toFixed(s < 10 * H ? 1 : 0)} h ago`;
-  return `${Math.round(s / D)} d ago`;
+  return `${Math.round(s / D)} days ago`;
 }
 function dur(min) {
   if (min < 60) return `${Math.round(min)} min`;
   if (min < 48 * 60) return `${(min / 60).toFixed(1)} h`;
-  return `${(min / 1440).toFixed(1)} d`;
+  return `${(min / 1440).toFixed(1)} days`;
 }
 const toLocalInput = (ts) => { const d = new Date(ts * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 const fromLocalInput = (v) => new Date(v).getTime() / 1000;
-const now = () => Date.now() / 1000;
+const initials = (name) => String(name || "?").split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+const firstName = (name) => String(name || "").split(/\s+/)[0] || name;
+const haversine = (a1, o1, a2, o2) => {
+  const r = 6371008.8, p1 = a1 * Math.PI / 180, p2 = a2 * Math.PI / 180, dp = p2 - p1, dl = (o2 - o1) * Math.PI / 180;
+  const a = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * r * Math.asin(Math.sqrt(a));
+};
+
+/* ---------------- icons ---------------- */
+const ICONS = {
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/>',
+  tablet: '<rect x="4" y="2.5" width="16" height="19" rx="2"/><path d="M11 18.5h2"/>',
+  laptop: '<rect x="5" y="5" width="14" height="10" rx="1"/><path d="M3 19h18"/>',
+  desktop: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M9 20h6M12 16v4"/>',
+  watch: '<rect x="7" y="7" width="10" height="10" rx="3"/><path d="M9 7l1-4h4l1 4M9 17l1 4h4l1-4"/>',
+  buds: '<circle cx="8" cy="8" r="3"/><path d="M8 11v8"/><circle cx="16" cy="8" r="3"/><path d="M16 11v8"/>',
+  tag: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  camera: '<rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l2-3h4l2 3"/>',
+  dot: '<circle cx="12" cy="12" r="4"/>',
+};
+function kindOf(d) {
+  const c = `${d.device_class || ""} ${d.model || ""}`;
+  if (d.source === "photos") return "camera";
+  if (d.source === "airtag" || /AirTag/.test(c)) return "tag";
+  if (/iPhone/.test(c)) return "phone";
+  if (/iPad/.test(c)) return "tablet";
+  if (/Watch/.test(c)) return "watch";
+  if (/iMac|Macmini|Mac mini|MacPro|Mac Pro/.test(c)) return "desktop";
+  if (/MacBook|Mac/.test(c)) return "laptop";
+  if (/Accessory|AirPods|Beats/.test(c)) return "buds";
+  return "dot";
+}
+const icon = (d) => `<svg class="dev-ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[kindOf(d)]}</svg>`;
+function battIcon(b, charging) {
+  const pct = Math.max(0, Math.min(1, b));
+  return `<svg viewBox="0 0 20 10" aria-hidden="true"><rect x=".5" y=".5" width="16" height="9" rx="2" fill="none" stroke="currentColor"/>
+    <rect x="17.5" y="3" width="2" height="4" rx="1" fill="currentColor"/><rect x="2" y="2" width="${(13 * pct).toFixed(1)}" height="6" rx="1" fill="currentColor" opacity="${charging ? 0.45 : 1}"/>${charging ? '<path d="M9.5 1.5L6 5.5h3l-1.5 3 4-4.2h-3l1.5-2.8z" fill="currentColor" stroke="var(--panel)" stroke-width=".6"/>' : ""}</svg>`;
+}
+function battHTML(d) {
+  if (!d || d.battery == null) return "";
+  const b = Math.round(d.battery * 100);
+  return `<span class="batt ${b <= 20 ? "low" : ""}" title="${d.battery_status === "Charging" ? "Charging" : "Battery"}">${battIcon(d.battery, d.battery_status === "Charging")}${b}%</span>`;
+}
 
 /* ---------------- auth ---------------- */
 let authMode = "login";
@@ -54,7 +108,7 @@ async function showAuth() {
   const st = await api("/api/auth/state");
   $("#app").classList.add("hidden"); $("#auth").classList.remove("hidden");
   authMode = st.password_set ? "login" : "setup";
-  $("#authMsg").textContent = st.password_set ? "Sign in" : "First run: choose a password for this web UI (8+ characters).";
+  $("#authMsg").textContent = st.password_set ? "Sign in" : "First visit: choose a password for this page (8 or more characters).";
   $("#authPw2").classList.toggle("hidden", st.password_set);
   $("#authBtn").textContent = st.password_set ? "Sign in" : "Set password";
   $("#authPw").autocomplete = st.password_set ? "current-password" : "new-password";
@@ -65,7 +119,7 @@ $("#authForm").addEventListener("submit", async (e) => {
   const pw = $("#authPw").value;
   try {
     if (authMode === "setup") {
-      if (pw !== $("#authPw2").value) throw new Error("passwords differ");
+      if (pw !== $("#authPw2").value) throw new Error("The two passwords don't match.");
       await api("/api/auth/setup", { method: "POST", body: { password: pw } });
     } else await api("/api/auth/login", { method: "POST", body: { password: pw } });
     $("#authPw").value = $("#authPw2").value = "";
@@ -74,20 +128,21 @@ $("#authForm").addEventListener("submit", async (e) => {
 });
 $("#logoutBtn").onclick = async () => { await api("/api/auth/logout", { method: "POST" }); location.reload(); };
 
-/* ---------------- map + base layers ---------------- */
-const map = L.map("map", { zoomControl: false, maxZoom: 22, preferCanvas: true, worldCopyJump: true }).setView(store.get("view", [39.5, -98.35]), store.get("zoom", 4));
+/* ---------------- map ---------------- */
+const map = L.map("map", { zoomControl: false, maxZoom: 22, preferCanvas: true, worldCopyJump: true, zoomAnimation: !reduceMotion })
+  .setView(store.get("view", [39.5, -98.35]), store.get("zoom", 4));
 L.control.zoom({ position: "topright" }).addTo(map);
 L.control.scale({ position: "bottomright", imperial: true }).addTo(map);
 const canvasR = L.canvas({ padding: 0.3 });
-
+new ResizeObserver(() => map.invalidateSize({ pan: false })).observe($("#map"));
 const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-const esriAttr = "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, USDA, USGS, AeroGRID, IGN, GIS User Community";
+const esriAttr = "Tiles &copy; Esri, Maxar, Earthstar Geographics, USDA, USGS, AeroGRID, IGN, GIS User Community";
 const esri = (svc) => `https://server.arcgisonline.com/ArcGIS/rest/services/${svc}/MapServer/tile/{z}/{y}/{x}`;
 const MAXZ = 22; // overzoom: past a layer's native level Leaflet scales up its last real tiles
 const BASES = {
   "Streets (OSM)": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, attribution: osmAttr }),
-  "Streets (Esri)": L.tileLayer(esri("World_Street_Map"), { maxZoom: MAXZ, maxNativeZoom: 19, attribution: esriAttr }),
   "Dark streets (OSM)": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, attribution: osmAttr, className: "tiles-dark" }),
+  "Streets (Esri)": L.tileLayer(esri("World_Street_Map"), { maxZoom: MAXZ, maxNativeZoom: 19, attribution: esriAttr }),
   "Light grey (≤z16)": L.layerGroup([
     L.tileLayer(esri("Canvas/World_Light_Gray_Base"), { maxZoom: MAXZ, maxNativeZoom: 16, attribution: esriAttr }),
     L.tileLayer(esri("Canvas/World_Light_Gray_Reference"), { maxZoom: MAXZ, maxNativeZoom: 16 }),
@@ -112,115 +167,49 @@ let baseName = store.get("base", darkPref ? "Dark streets (OSM)" : "Streets (OSM
 if (!BASES[baseName]) baseName = darkPref ? "Dark streets (OSM)" : "Streets (OSM)";
 BASES[baseName].addTo(map);
 
+const L_people = L.layerGroup().addTo(map);
 const L_tracks = L.layerGroup().addTo(map);
-const L_points = L.layerGroup();
 const L_acc = L.layerGroup().addTo(map);
+const L_devices = L.layerGroup();
+const L_points = L.layerGroup();
 const L_heat = L.heatLayer([], { radius: 18, blur: 16, minOpacity: 0.3, maxZoom: 17 });
 const L_stays = L.layerGroup().addTo(map);
 const L_places = L.layerGroup().addTo(map);
 const L_photos = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 });
-const L_now = L.layerGroup().addTo(map);
-const L_search = L.layerGroup().addTo(map);
+const L_temp = L.layerGroup().addTo(map);
 const OVER = {
-  "Current positions": L_now, "Tracks": L_tracks, "Accuracy circles": L_acc, "All fixes (dots)": L_points,
-  "Heatmap": L_heat, "Stays (Insights)": L_stays, "Places / geofences": L_places, "Photo locations": L_photos,
+  "People and items": L_people, "Tracks": L_tracks, "Accuracy circles": L_acc, "Every device separately": L_devices,
+  "Every fix as a dot": L_points, "Heatmap": L_heat, "Stays (from Insights)": L_stays, "Places": L_places, "Photo locations": L_photos,
 };
-const overOn = store.get("overlays", null);
+const overOn = store.get("overlays2", null);
 if (overOn) for (const [n, l] of Object.entries(OVER)) { if (overOn.includes(n)) l.addTo(map); else map.removeLayer(l); }
 else L_photos.addTo(map);
 L.control.layers(BASES, OVER, { position: "topright", collapsed: true }).addTo(map);
 map.on("baselayerchange", (e) => store.set("base", e.name));
-const saveOver = () => store.set("overlays", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n));
-map.on("overlayadd overlayremove", () => { saveOver(); render(); });
+map.on("overlayadd overlayremove", () => { store.set("overlays2", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n)); render(); });
 map.on("moveend", () => { const c = map.getCenter(); store.set("view", [c.lat, c.lng]); store.set("zoom", map.getZoom()); });
+map.on("zoomend", () => $("#map").classList.toggle("far", map.getZoom() < 14));
+const fly = (ll, z) => (reduceMotion ? map.setView(ll, z) : map.flyTo(ll, z, { duration: 0.6 }));
 
 /* ---------------- state ---------------- */
 const S = {
-  devices: [], byId: {}, fences: [], data: {}, start: 0, end: 0, t: 0, preset: store.get("preset", "live"),
-  playing: false, firstFit: true, picking: false, insights: null, showHidden: false,
+  devices: [], byId: {}, people: [], fences: [], data: {}, start: 0, end: 0, t: 0, preset: store.get("preset", "live"),
+  follow: true, playing: false, firstFit: true, picking: false, showHidden: false, runs: [], lastRefresh: 0,
+  expanded: new Set(store.get("expanded", [])), afterPlaceSave: null,
 };
+const visible = (d) => S.showHidden || !d.hidden;
+const CARRY_RANK = { phone: 0, watch: 1, tablet: 2 };
 
-const isPhotos = (d) => d && d.source === "photos";
-const visibleDevs = () => S.devices.filter((d) => S.showHidden || !d.hidden);
-const initials = (d) => (d.owner && d.owner !== "Me" ? d.owner : d.name).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-const devIcon = { iPhone: "📱", iPad: "▭", Mac: "💻", Watch: "⌚", AirPods: "🎧", AirTag: "◉", Photos: "📷" };
-const classIcon = (d) => { for (const k in devIcon) if ((d.device_class || "").includes(k) || (d.model || "").includes(k)) return devIcon[k]; return "•"; };
-
-/* ---------------- time range ---------------- */
-function presetRange(p, first) {
-  const n = now();
-  const span = { "1h": H, "6h": 6 * H, "24h": D, "live": D, "7d": 7 * D, "30d": 30 * D, "1y": 365 * D }[p];
-  if (span) return [n - span, n];
-  return [first || n - 30 * D, n];
-}
-async function setPreset(p) {
-  S.preset = p; store.set("preset", p);
-  $$("#presets button").forEach((b) => b.classList.toggle("active", b.dataset.p === p));
-  let first;
-  if (p === "all") first = (await api("/api/range")).first;
-  [S.start, S.end] = presetRange(p, first);
-  S.t = S.end;
-  await loadPoints();
-}
-$$("#presets button").forEach((b) => (b.onclick = () => { stopPlay(); setPreset(b.dataset.p); }));
-$("#tApply").onclick = () => {
-  const a = fromLocalInput($("#tFrom").value), b = fromLocalInput($("#tTo").value);
-  if (!(a < b)) return toast("From must be before To");
-  stopPlay(); S.preset = "custom"; $$("#presets button").forEach((x) => x.classList.remove("active"));
-  S.start = a; S.end = b; S.t = b; loadPoints();
-};
-function shift(dir) {
-  const span = S.end - S.start; stopPlay();
-  S.preset = "custom"; $$("#presets button").forEach((x) => x.classList.remove("active"));
-  S.start += dir * span; S.end += dir * span; S.t = S.end; loadPoints();
-}
-$("#tPrev").onclick = () => shift(-1);
-$("#moreBtn").onclick = () => $("#timebar").classList.toggle("more");
-$("#tNext").onclick = () => shift(1);
-
-const scrub = $("#scrub");
-scrub.addEventListener("input", () => { S.t = S.start + (scrub.value / 1000) * (S.end - S.start); if (S.preset === "live" && scrub.value < 1000) markCustomCursor(); schedRender(); });
-function markCustomCursor() { /* scrubbing in live keeps range but freezes cursor until refresh */ }
-
-/* ---------------- playback ---------------- */
-let lastFrame = 0;
-function stopPlay() { S.playing = false; $("#playIco").innerHTML = '<path d="M7 5l12 7-12 7z"/>'; }
-$("#playBtn").onclick = () => {
-  if (S.playing) return stopPlay();
-  if (S.t >= S.end - 1) S.t = S.start;
-  S.playing = true; $("#playIco").innerHTML = '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
-  lastFrame = performance.now(); requestAnimationFrame(tick);
-};
-function tick(ts) {
-  if (!S.playing) return;
-  const dtS = (ts - lastFrame) / 1000; lastFrame = ts;
-  S.t = Math.min(S.end, S.t + dtS * Number($("#speed").value));
-  render();
-  if (S.t >= S.end) return stopPlay();
-  requestAnimationFrame(tick);
-}
-
-/* ---------------- loading ---------------- */
-async function loadDevices() {
-  S.devices = await api("/api/devices");
-  S.byId = Object.fromEntries(S.devices.map((d) => [d.id, d]));
-  renderDeviceList(); fillDeviceSelects();
-}
-async function loadFences() { S.fences = await api("/api/geofences"); renderPlaces(); }
-async function loadPoints() {
-  $("#tFrom").value = toLocalInput(S.start); $("#tTo").value = toLocalInput(S.end);
-  const res = await api(`/api/points?start=${S.start}&end=${S.end}`);
-  S.data = res.points;
-  if (res.truncated) toast("Range has too many points; showing the first 200k. Narrow the range.");
-  drawHisto(); buildPhotos(); render(true);
-  if (S.firstFit) { S.firstFit = false; fitAll(); }
-  if (!$('[data-body="insights"]').classList.contains("hidden")) loadInsights();
-}
-function fitAll() {
-  const ll = [];
-  for (const d of visibleDevs()) { if (isPhotos(d)) continue; const p = lastAt(d.id, S.t); if (p) ll.push([p[1], p[2]]); }
-  if (!ll.length) for (const d of visibleDevs()) if (d.last) ll.push([d.last.lat, d.last.lon]);
-  if (ll.length === 1) map.setView(ll[0], 15); else if (ll.length) map.fitBounds(ll, { padding: [60, 60], maxZoom: 15 });
+function buildPeople(list) {
+  const colors = Object.fromEntries(list.map((p) => [p.name, p.color]));
+  S.people = list.map((p) => {
+    const devs = S.devices.filter((d) => d.owner === p.name && d.source !== "photos");
+    const carried = devs.filter((d) => kindOf(d) in CARRY_RANK);
+    return { name: p.name, color: colors[p.name], devices: devs, carried: carried.length ? carried : devs.filter((d) => d.last) };
+  });
+  S.personByName = Object.fromEntries(S.people.map((p) => [p.name, p]));
+  S.items = S.devices.filter((d) => !d.owner && d.source !== "photos");
+  S.photoDevs = S.devices.filter((d) => d.source === "photos");
 }
 
 /* binary search: last point with ts <= t */
@@ -230,45 +219,254 @@ function idxAt(arr, t) {
   return r;
 }
 function lastAt(id, t) { const a = S.data[id]; if (!a || !a.length) return null; const i = idxAt(a, t); return i >= 0 ? a[i] : null; }
+const lastOf = (d) => (d.last ? [d.last.ts, d.last.lat, d.last.lon, d.last.acc, d.battery] : null);
 
-/* ---------------- histogram ---------------- */
-function drawHisto() {
-  const c = $("#histo"), w = c.clientWidth, h = c.clientHeight, dpr = devicePixelRatio || 1;
-  c.width = w * dpr; c.height = h * dpr;
-  const g = c.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
-  const bins = Math.max(20, Math.floor(w / 4)), counts = new Array(bins).fill(0), span = S.end - S.start || 1;
-  const perDev = [];
-  for (const d of visibleDevs()) {
-    const a = S.data[d.id]; if (!a) continue;
-    const cs = new Array(bins).fill(0);
-    for (const p of a) { const b = Math.min(bins - 1, Math.floor(((p[0] - S.start) / span) * bins)); if (b >= 0) { cs[b]++; counts[b]++; } }
-    perDev.push([d.color, cs]);
+/* Where is a person at time t? Freshest carried-device fix; an iPhone wins ties within 15 min. */
+function personPos(p, t = S.t) {
+  let best = null;
+  for (const d of p.carried) {
+    if (!visible(d)) continue;
+    const pt = lastAt(d.id, t) || (S.follow && d.last && d.last.ts <= t + 60 ? lastOf(d) : null);
+    if (!pt) continue;
+    const c = { dev: d, p: pt, rank: CARRY_RANK[kindOf(d)] ?? 3 };
+    if (!best || pt[0] > best.p[0] + 15 * 60 || (Math.abs(pt[0] - best.p[0]) <= 15 * 60 && c.rank < best.rank)) best = c;
   }
-  const max = Math.max(1, ...counts), bw = w / bins;
-  // stacked per-device bars so you can see who was moving when
-  const base = new Array(bins).fill(0);
-  for (const [color, cs] of perDev) {
-    g.fillStyle = color; g.globalAlpha = 0.75;
-    for (let i = 0; i < bins; i++) if (cs[i]) {
-      const bh = (Math.sqrt(cs[i] + base[i]) / Math.sqrt(max)) * (h - 4) - (Math.sqrt(base[i]) / Math.sqrt(max)) * (h - 4);
-      const y = h - 2 - (Math.sqrt(base[i]) / Math.sqrt(max)) * (h - 4) - bh;
-      g.fillRect(i * bw + 0.5, y, Math.max(1, bw - 1), bh); base[i] += cs[i];
+  return best;
+}
+/* The device whose track represents a person in the loaded range. */
+function primaryOf(p) {
+  let best = null;
+  for (const d of p.carried) {
+    if (!visible(d)) continue;
+    const n = (S.data[d.id] || []).length;
+    const score = n * 10 - (CARRY_RANK[kindOf(d)] ?? 3);
+    if (n && (!best || score > best.score)) best = { d, score };
+  }
+  return best ? best.d : null;
+}
+function fenceAt(lat, lon) {
+  let hit = null;
+  for (const g of S.fences) if (haversine(lat, lon, g.lat, g.lon) <= g.radius && (!hit || g.radius < hit.radius)) hit = g;
+  return hit;
+}
+/* Status line for a person at the cursor. */
+function personStatus(p) {
+  const pos = personPos(p);
+  if (!pos) return { pos: null, text: "No location yet", stale: true };
+  const [ts, lat, lon] = pos.p;
+  const g = fenceAt(lat, lon);
+  const run = (S.runs.find((r) => r.person === p.name) || { runs: [] }).runs.find((r) => r.t0 <= ts && ts <= r.t1 + 60);
+  const age = S.t - ts;
+  const stale = age > 2 * H;
+  let text;
+  if (g) {
+    const since = run && run.state === "f" + g.id ? run.t0 : null;
+    text = `At <span class="place-name">${esc(g.name)}</span>${since && since > S.start + 60 ? ` since ${clock(since, S.t)}` : ""}`;
+  } else if (run && run.state === "move") text = "On the move";
+  else text = "Not at a saved place";
+  return { pos, text, stale, place: g, when: S.follow ? ago(ts) : `as of ${clock(ts, S.t)}` };
+}
+
+/* ---------------- time range ---------------- */
+function presetRange(p, first) {
+  const n = now();
+  const span = { "6h": 6 * H, "24h": D, "live": D, "7d": 7 * D, "30d": 30 * D, "1y": 365 * D }[p];
+  if (span) return [n - span, n];
+  return [first || n - 30 * D, n];
+}
+function markPresets() { $$("#presets button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.p === S.preset))); }
+async function setPreset(p) {
+  S.preset = p; store.set("preset", p); markPresets();
+  let first;
+  if (p === "all") first = (await api("/api/range")).first;
+  [S.start, S.end] = presetRange(p, first);
+  S.t = S.end; S.follow = p === "live";
+  await loadPoints();
+}
+$$("#presets button").forEach((b) => (b.onclick = () => { stopPlay(); setPreset(b.dataset.p); }));
+function customRange(a, b) {
+  stopPlay(); S.preset = "custom"; markPresets(); S.follow = false;
+  S.start = a; S.end = b; S.t = b; loadPoints();
+}
+$("#tApply").onclick = () => {
+  const a = fromLocalInput($("#tFrom").value), b = fromLocalInput($("#tTo").value);
+  if (!(a < b)) return toast("Pick a start time before the end time.");
+  customRange(a, b);
+};
+const shift = (dir) => { const span = S.end - S.start; customRange(S.start + dir * span, S.end + dir * span); };
+$("#tPrev").onclick = () => shift(-1);
+$("#tNext").onclick = () => shift(1);
+$("#moreBtn").onclick = () => { const on = $("#timebar").classList.toggle("more"); $("#moreBtn").setAttribute("aria-expanded", String(on)); };
+
+const scrub = $("#scrub");
+scrub.addEventListener("input", () => {
+  S.t = S.start + (scrub.value / 1000) * (S.end - S.start);
+  S.follow = S.preset === "live" && scrub.value >= 999;
+  schedRender();
+});
+
+/* ---------------- banner: live vs viewing the past ---------------- */
+function updateBanner() {
+  const b = $("#viewBanner");
+  if (S.follow && !S.playing) {
+    b.className = "view-banner live";
+    b.innerHTML = `<span class="dot"></span><span>Live, updated ${S.lastRefresh ? ago(S.lastRefresh) : "now"}</span>`;
+  } else {
+    b.className = "view-banner";
+    b.innerHTML = `<span class="dot" style="background:var(--contour)"></span><span>Viewing ${esc(dt(S.t))}</span><button class="btn small primary" id="backNow">Back to now</button>`;
+    $("#backNow").onclick = () => { stopPlay(); setPreset("live"); };
+  }
+}
+
+/* ---------------- playback ---------------- */
+let lastFrame = 0;
+function stopPlay() {
+  S.playing = false;
+  $("#playIco").innerHTML = '<path d="M8 5l11 7-11 7z"/>';
+  $("#playBtn").setAttribute("aria-label", "Play"); $("#playBtn").title = "Play";
+}
+$("#playBtn").onclick = () => {
+  if (S.playing) { stopPlay(); render(); return; }
+  if (S.t >= S.end - 1) S.t = S.start;
+  S.playing = true; S.follow = false;
+  $("#playIco").innerHTML = '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
+  $("#playBtn").setAttribute("aria-label", "Pause"); $("#playBtn").title = "Pause";
+  lastFrame = performance.now(); requestAnimationFrame(tick);
+};
+function tick(ts) {
+  if (!S.playing) return;
+  const dtS = (ts - lastFrame) / 1000; lastFrame = ts;
+  S.t = Math.min(S.end, S.t + dtS * Number($("#speed").value));
+  render();
+  if (S.t >= S.end) { stopPlay(); render(); return; }
+  requestAnimationFrame(tick);
+}
+
+/* ---------------- loading ---------------- */
+async function loadDevices() {
+  const [devs, people] = await Promise.all([api("/api/devices"), api("/api/people")]);
+  S.devices = devs; S.byId = Object.fromEntries(devs.map((d) => [d.id, d]));
+  buildPeople(people);
+  fillDeviceSelect();
+}
+async function loadFences() { S.fences = await api("/api/geofences"); renderPlaces(); }
+async function loadPoints() {
+  $("#tFrom").value = toLocalInput(S.start); $("#tTo").value = toLocalInput(S.end);
+  const res = await api(`/api/points?start=${S.start}&end=${S.end}`);
+  S.data = res.points;
+  if (res.truncated) toast("This range has more than 200,000 fixes, so only the first 200,000 are shown. Choose a shorter range.", 6000);
+  computeRuns(); drawLanes(); buildPhotos(); render(true);
+  if (S.firstFit) { S.firstFit = false; requestAnimationFrame(() => { map.invalidateSize(); fitAll(); }); }
+  if (!$("#tab-insights").classList.contains("hidden")) loadInsights();
+}
+function fitAll() {
+  const ll = [];
+  for (const p of S.people) { const pos = personPos(p); if (pos) ll.push([pos.p[1], pos.p[2]]); }
+  if (ll.length === 1) map.setView(ll[0], 15); else if (ll.length) map.fitBounds(ll, { padding: [70, 70], maxZoom: 15 });
+}
+
+/* ---------------- timeline lanes ---------------- */
+function laneH() { return isPhone() ? 12 : 16; }
+const LANE_TOP = 14;
+function computeRuns() {
+  S.runs = S.people.map((p) => {
+    const d = primaryOf(p);
+    const a = d ? S.data[d.id] || [] : [];
+    const states = a.map((pt, i) => {
+      const g = fenceAt(pt[1], pt[2]);
+      if (g) return "f" + g.id;
+      const nb = [a[i - 1], a[i + 1]].filter(Boolean);
+      const moving = nb.some((q) => Math.abs(q[0] - pt[0]) < 45 * 60 && haversine(q[1], q[2], pt[1], pt[2]) > 250);
+      return moving ? "move" : "else";
+    });
+    const runs = [];
+    for (let i = 0; i < a.length; i++) {
+      const t0 = a[i][0], next = a[i + 1] ? a[i + 1][0] : Math.min(S.end, now());
+      const t1 = Math.min(next, t0 + LANE_GAP);
+      const last = runs[runs.length - 1];
+      if (last && last.state === states[i] && Math.abs(last.t1 - t0) < 1) last.t1 = t1;
+      else runs.push({ state: states[i], t0, t1 });
+    }
+    return { person: p.name, color: p.color, dev: d, runs };
+  });
+}
+function runColor(state, person) {
+  if (state === "move") return person.color;
+  if (state === "else") return null;
+  const g = S.fences.find((f) => "f" + f.id === state);
+  return g ? g.color : "#999";
+}
+function runLabel(state) {
+  if (state === "move") return "On the move";
+  if (state === "else") return "Not at a saved place";
+  const g = S.fences.find((f) => "f" + f.id === state);
+  return g ? `At <span class="place-name">${esc(g.name)}</span>` : "At a place";
+}
+function drawLanes() {
+  const c = $("#laneCanvas"), track = $("#laneTrack"), lh = laneH(), n = S.runs.length;
+  const w = track.clientWidth, h = LANE_TOP + Math.max(1, n) * lh + 2, dpr = devicePixelRatio || 1;
+  c.style.height = h + "px"; c.width = w * dpr; c.height = h * dpr;
+  const g = c.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.body), span = S.end - S.start || 1, X = (t) => ((t - S.start) / span) * w;
+  // night shading 20:00-06:00 local, for ranges up to a month
+  if (span <= 32 * D) {
+    g.fillStyle = css.getPropertyValue("--night");
+    const d0 = new Date(S.start * 1000); d0.setHours(0, 0, 0, 0);
+    for (let day = d0.getTime() / 1000 - D; day < S.end; day += D) {
+      const a = day + 20 * H, b = day + 30 * H;
+      if (b > S.start && a < S.end) g.fillRect(X(Math.max(a, S.start)), LANE_TOP, X(Math.min(b, S.end)) - X(Math.max(a, S.start)), h - LANE_TOP);
     }
   }
-  g.globalAlpha = 1;
-  // day ticks
-  g.fillStyle = getComputedStyle(document.body).getPropertyValue("--muted"); g.font = "10px system-ui";
+  // ticks
   const steps = [H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D, 14 * D, 30 * D, 91 * D, 365 * D];
-  const tickStep = steps.find((st) => (st / span) * w >= 64) || 365 * D;
-  const tz = new Date().getTimezoneOffset() * 60; // align day ticks to local midnight
-  const first = Math.ceil((S.start - tz) / tickStep) * tickStep + tz;
-  for (let t = first; t < S.end; t += tickStep) {
-    const x = ((t - S.start) / span) * w; g.globalAlpha = 0.35; g.fillRect(x, 0, 1, h); g.globalAlpha = 0.8;
-    g.fillText(tickStep < D ? fmtT.format(new Date(t * 1000)) : fmtD.format(new Date(t * 1000)), x + 3, 10);
+  const step = steps.find((st) => (st / span) * w >= 70) || 365 * D;
+  const tz = new Date().getTimezoneOffset() * 60;
+  g.font = `12px ${css.getPropertyValue("--ui")}`; g.textBaseline = "top";
+  for (let t = Math.ceil((S.start - tz) / step) * step + tz; t < S.end; t += step) {
+    const x = X(t); g.fillStyle = css.getPropertyValue("--rule"); g.fillRect(x, LANE_TOP - 2, 1, h - LANE_TOP + 2);
+    g.fillStyle = css.getPropertyValue("--muted");
+    const d = new Date(t * 1000);
+    g.fillText(step < D ? (d.getHours() === 0 ? fmtWD.format(d) : fmtT.format(d)) : step < 7 * D ? fmtWD.format(d) : fmtD.format(d), x + 3, 0);
   }
-  g.globalAlpha = 1;
+  // lanes
+  const elseCol = css.getPropertyValue("--muted");
+  S.runs.forEach((R, i) => {
+    const y = LANE_TOP + i * lh + 2, bh = lh - 5, person = S.personByName[R.person];
+    g.fillStyle = css.getPropertyValue("--rule-2"); g.fillRect(0, y + bh / 2 - 0.5, w, 1);
+    for (const r of R.runs) {
+      const x0 = X(Math.max(r.t0, S.start)), x1 = Math.max(x0 + 1.5, X(Math.min(r.t1, S.end)));
+      const col = runColor(r.state, person);
+      g.globalAlpha = col ? 0.92 : 0.28; g.fillStyle = col || elseCol;
+      g.fillRect(x0, y, x1 - x0, bh);
+    }
+    g.globalAlpha = 1;
+  });
+  // names + legend
+  $("#laneNames").style.paddingTop = LANE_TOP + "px";
+  $("#laneNames").innerHTML = S.runs.map((R) => `<div data-p="${esc(R.person)}" style="height:${lh}px" title="${esc(R.person)}"><i style="background:${S.personByName[R.person].color}"></i><span>${esc(firstName(R.person))}</span></div>`).join("") || `<div style="height:${lh}px" class="muted">No one yet</div>`;
+  const used = new Set(S.runs.flatMap((R) => R.runs.map((r) => r.state)));
+  const leg = S.fences.filter((f) => used.has("f" + f.id)).map((f) => `<span><i style="background:${f.color}"></i><span class="place-name">${esc(f.name)}</span></span>`);
+  if (used.has("move")) leg.push('<span><i style="background:linear-gradient(90deg,#c8385a,#1f78b4,#e08e0b)"></i>Moving (person\'s colour)</span>');
+  if (used.has("else")) leg.push(`<span><i style="background:${elseCol};opacity:.35"></i>Elsewhere</span>`);
+  leg.push("<span>Blank: no data</span>");
+  $("#laneLegend").innerHTML = leg.join("");
 }
-addEventListener("resize", () => drawHisto());
+$("#laneNames").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-p]"); if (!el) return;
+  const p = S.personByName[el.dataset.p], pos = p && personPos(p);
+  if (pos) fly([pos.p[1], pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${el.dataset.p} at this time.`);
+});
+$("#laneTrack").addEventListener("mousemove", (e) => {
+  const tr = $("#laneTrack").getBoundingClientRect(), x = e.clientX - tr.left, y = e.clientY - tr.top;
+  const i = Math.floor((y - LANE_TOP) / laneH()), R = S.runs[i], tip = $("#laneTip");
+  if (!R || y < LANE_TOP) { tip.classList.add("hidden"); return; }
+  const t = S.start + (x / tr.width) * (S.end - S.start);
+  const r = R.runs.find((q) => q.t0 <= t && t <= q.t1);
+  tip.innerHTML = `<b>${esc(firstName(R.person))}</b> ${r ? `${runLabel(r.state)}, ${clock(r.t0, r.t1)} to ${clock(r.t1, r.t1)}` : `no fixes around ${clock(t)}`}`;
+  tip.style.left = Math.max(60, Math.min(tr.width - 60, x)) + "px"; tip.classList.remove("hidden");
+});
+$("#laneTrack").addEventListener("mouseleave", () => $("#laneTip").classList.add("hidden"));
+addEventListener("resize", () => drawLanes());
 
 /* ---------------- render ---------------- */
 let rafPending = false;
@@ -277,196 +475,308 @@ function schedRender() { if (!rafPending) { rafPending = true; requestAnimationF
 function render(full = false) {
   const span = S.end - S.start || 1;
   scrub.value = Math.round(((S.t - S.start) / span) * 1000);
-  $("#tNow").textContent = dt(S.t);
-  $("#tSpan").textContent = `${fmtD.format(new Date(S.start * 1000))} → ${fmtD.format(new Date(S.end * 1000))} · ${dur(span / 60)}`;
-  const trail = Number($("#trail").value);
-  const from = trail ? Math.max(S.start, S.t - trail) : S.start;
-  L_tracks.clearLayers(); L_now.clearLayers(); L_acc.clearLayers(); L_points.clearLayers();
-  const heat = [], wantDots = map.hasLayer(L_points), wantHeat = map.hasLayer(L_heat);
-  for (const d of visibleDevs()) {
-    const a = S.data[d.id]; if (!a || !a.length) continue;
-    const i1 = idxAt(a, S.t); if (i1 < 0) continue;
-    let i0 = idxAt(a, from - 1e-6) + 1;
-    if (isPhotos(d)) { if (wantHeat) for (let i = i0; i <= i1; i++) heat.push([a[i][1], a[i][2], 0.5]); continue; }
-    // track: split into segments at long gaps
+  scrub.setAttribute("aria-valuetext", dt(S.t));
+  updateBanner();
+  const trail = Number($("#trail").value), from = trail ? Math.max(S.start, S.t - trail) : S.start;
+  L_tracks.clearLayers(); L_people.clearLayers(); L_acc.clearLayers(); L_points.clearLayers(); L_devices.clearLayers();
+  const heat = [], wantDots = map.hasLayer(L_points), wantHeat = map.hasLayer(L_heat), wantDevs = map.hasLayer(L_devices);
+
+  const drawTrack = (d, color, opts = {}) => {
+    const a = S.data[d.id]; if (!a || !a.length) return;
+    const i1 = idxAt(a, S.t); if (i1 < 0) return;
+    const i0 = idxAt(a, from - 1e-6) + 1;
     let seg = [];
-    const flush = () => { if (seg.length > 1) L.polyline(seg, { color: d.color, weight: 3.5, opacity: 0.85, renderer: canvasR, lineJoin: "round" }).addTo(L_tracks); seg = []; };
+    const flush = () => { if (seg.length > 1) L.polyline(seg, { color, weight: opts.weight || 3.5, opacity: opts.opacity || 0.85, dashArray: opts.dash, renderer: canvasR, lineJoin: "round" }).addTo(L_tracks); seg = []; };
     for (let i = i0; i <= i1; i++) {
       const p = a[i];
       if (seg.length && p[0] - a[i - 1][0] > GAP_BREAK) flush();
       seg.push([p[1], p[2]]);
       if (wantHeat) heat.push([p[1], p[2], 0.6]);
-      if (wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color: d.color, weight: 1, fillOpacity: 0.7, renderer: canvasR })
-        .bindPopup(() => pointPopup(d, p)).addTo(L_points);
+      if (wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1, fillOpacity: 0.7, renderer: canvasR }).bindPopup(() => fixPopup(d, p)).addTo(L_points);
     }
     flush();
-    // current marker
-    const p = a[i1];
-    const stale = S.t - p[0] > 2 * H;
-    const icon = L.divIcon({ className: "devmark" + (stale ? " stale" : ""), iconSize: [30, 30], iconAnchor: [15, 15],
-      html: `<div class="b" style="background:${d.color}">${esc(classIcon(d) === "•" ? initials(d) : classIcon(d))}</div><div class="lbl">${esc(d.name)}</div>` });
-    L.marker([p[1], p[2]], { icon, zIndexOffset: 1000, title: d.name }).bindPopup(() => pointPopup(d, p, true)).addTo(L_now);
-    if (p[3] && p[3] > 15) L.circle([p[1], p[2]], { radius: p[3], color: d.color, weight: 1, opacity: 0.5, fillOpacity: 0.08, interactive: false }).addTo(L_acc);
-  }
-  if (wantHeat) L_heat.setLatLngs(heat);
-  if (full) renderDeviceList();
-}
-
-function pointPopup(d, p, current = false) {
-  const [ts, lat, lon, acc, batt, kind, meta] = p;
-  const rows = [
-    ["When", `${dt(ts)} <span class="muted">(${ago(ts)})</span>`],
-    ["Accuracy", acc != null ? `±${Math.round(acc)} m` : "—"],
-    batt != null ? ["Battery", `${Math.round(batt * 100)}%`] : null,
-    kind ? ["Source", esc(kind)] : null,
-    meta && meta.file ? ["Photo", esc(String(meta.file).split("/").pop())] : null,
-    ["Position", `<code>${lat.toFixed(5)}, ${lon.toFixed(5)}</code>`],
-  ].filter(Boolean);
-  const el = document.createElement("div"); el.className = "pop";
-  el.innerHTML = `<h4>${esc(d.name)}${d.owner ? ` <span class="muted">· ${esc(d.owner)}</span>` : ""}</h4>
-    <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")}</table>
-    <div class="acts"><a data-a="here">What's here?</a><a data-a="place">Make a place</a><a data-a="ins">Insights</a>
-    ${current && d.source === "icloud" ? '<a data-a="locate">Locate this device</a>' : ""}
-    <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank" rel="noopener">Directions</a></div>`;
-  el.addEventListener("click", async (e) => {
-    const a = e.target.dataset.a; if (!a) return;
-    if (a === "here") whatsHere(lat, lon);
-    if (a === "place") newPlace(lat, lon);
-    if (a === "ins") { $("#insDevice").value = d.id; openTab("insights"); }
-    if (a === "locate") locateOne(d);
-  });
-  return el;
-}
-
-/* photos: clustered, built once per load */
-function buildPhotos() {
-  L_photos.clearLayers();
-  for (const d of visibleDevs()) {
-    if (!isPhotos(d) || !S.data[d.id]) continue;
-    const ms = S.data[d.id].map((p) => L.marker([p[1], p[2]], { icon: L.divIcon({ className: "photomark", iconSize: [10, 10] }) }).bindPopup(() => pointPopup(d, p)));
-    L_photos.addLayers(ms);
-  }
-}
-
-/* ---------------- device list ---------------- */
-function deviceRow(d) {
-  const p = lastAt(d.id, S.t) || (d.last ? [d.last.ts, d.last.lat, d.last.lon, d.last.acc] : null);
-  const b = d.battery != null ? Math.round(d.battery * 100) : null;
-  const canLocate = d.source === "icloud" && (d.meta || {}).locationCapable !== false;
-  const row = document.createElement("div");
-  row.className = "dev" + (d.hidden ? " off" : "");
-  row.innerHTML = `<span class="dot" style="background:${d.color}"></span>
-    <span class="nm" title="${esc(d.model || "")}">${esc(classIcon(d))} ${esc(d.name)}</span>
-    <span class="tools">${canLocate ? '<button data-a="locate" title="Locate this device now">⟳</button>' : ""}
-      <button data-a="color" title="Colour">●</button><button data-a="rename" title="Rename">✎</button>
-      <button data-a="hide" title="${d.hidden ? "Show" : "Hide"}">${d.hidden ? "◌" : "◉"}</button></span>
-    <span class="sub"><span>${p ? ago(p[0]) : "no location"}</span>
-      ${p && p[3] ? `<span>±${Math.round(p[3])} m</span>` : ""}
-      ${b != null ? `<span class="batt ${b <= 20 ? "low" : ""}">${b}%${d.battery_status === "Charging" ? "⚡" : ""}</span>` : ""}
-      ${d.n_points ? `<span>${d.n_points} fixes</span>` : ""}${d.model ? `<span>${esc(d.model)}</span>` : ""}</span>`;
-  row.onclick = async (e) => {
-    const a = e.target.dataset.a;
-    if (a === "locate") return locateOne(d, e.target);
-    if (a === "hide") { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { hidden: d.hidden ? 0 : 1 } }); await loadDevices(); render(); drawHisto(); return; }
-    if (a === "rename") { const n = prompt("Display name", d.name); if (n) { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n } }); await loadDevices(); render(); } return; }
-    if (a === "color") { const inp = document.createElement("input"); inp.type = "color"; inp.value = d.color; inp.onchange = async () => { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { color: inp.value } }); await loadDevices(); render(); drawHisto(); }; inp.click(); return; }
-    if (p) { map.setView([p[1], p[2]], Math.max(map.getZoom(), 15)); }
-    else toast(`${d.name}: Apple has no location for this device (offline or location off)`);
-    if (innerWidth < 820) $("#app").classList.add("noside");
   };
-  return row;
-}
-function renderDeviceList() {
-  const el = $("#deviceList"); el.innerHTML = "";
-  const groups = {};
-  for (const d of S.devices) { if (d.hidden && !S.showHidden) continue; (groups[d.owner || (isPhotos(d) ? "History" : "Items")] ||= []).push(d); }
-  if (!S.devices.length) el.innerHTML = '<p class="muted">No devices yet. Sign in to iCloud on the <a href="#settings" onclick="openTab(\'settings\')">Settings</a> tab.</p>';
-  const openNoFix = store.get("openNoFix", []);
-  for (const [owner, devs] of Object.entries(groups)) {
-    el.insertAdjacentHTML("beforeend", `<div class="owner-h">${esc(owner)}</div>`);
-    const withFix = devs.filter((d) => d.last).sort((a, b) => b.last.ts - a.last.ts);
-    const noFix = devs.filter((d) => !d.last);
-    for (const d of withFix) el.appendChild(deviceRow(d));
-    if (noFix.length) {
-      const det = document.createElement("details"); det.className = "nofix"; det.open = openNoFix.includes(owner);
-      det.innerHTML = `<summary>${noFix.length} without a location (offline / location off)</summary>`;
-      det.ontoggle = () => { const s = new Set(store.get("openNoFix", [])); det.open ? s.add(owner) : s.delete(owner); store.set("openNoFix", [...s]); };
-      for (const d of noFix) det.appendChild(deviceRow(d));
-      el.appendChild(det);
+
+  // people: one marker each, merged when together
+  const placed = [];
+  for (const p of S.people) {
+    const prim = primaryOf(p);
+    if (prim) drawTrack(prim, p.color);
+    const st = personStatus(p);
+    if (!st.pos) continue;
+    const [ts, lat, lon, acc] = st.pos.p;
+    if (acc && acc > 15) L.circle([lat, lon], { radius: acc, color: p.color, weight: 1, opacity: 0.5, fillOpacity: 0.07, interactive: false }).addTo(L_acc);
+    placed.push({ p, st, lat, lon, ts });
+  }
+  const groups = [];
+  for (const it of placed) {
+    const g = groups.find((G) => (it.st.place && G.place && it.st.place.id === G.place.id) || haversine(G.lat, G.lon, it.lat, it.lon) < 60);
+    if (g) g.members.push(it); else groups.push({ place: it.st.place, lat: it.lat, lon: it.lon, members: [it] });
+  }
+  for (const G of groups) {
+    if (G.members.length === 1) {
+      const { p, st, lat, lon } = G.members[0];
+      const ic = L.divIcon({ className: "pmark" + (st.stale ? " stale" : ""), iconSize: [34, 34], iconAnchor: [17, 17],
+        html: `<div class="av" style="background:${p.color}">${esc(initials(p.name))}</div><div class="lbl">${esc(firstName(p.name))}</div>` });
+      L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.name, keyboard: true }).bindPopup(() => personPopup(p)).addTo(L_people);
+    } else {
+      const avs = G.members.map(({ p }) => `<div class="av" style="background:${p.color}" title="${esc(p.name)}">${esc(initials(p.name))}</div>`).join("");
+      const ic = L.divIcon({ className: "", iconSize: null, html: `<div class="gmark">${avs}${G.place ? `<span class="place-name">${esc(G.place.name)}</span>` : ""}</div>` });
+      const names = G.members.map(({ p }) => firstName(p.name)).join(", ");
+      L.marker([G.lat, G.lon], { icon: ic, zIndexOffset: 1000, title: names }).bindPopup(() => groupPopup(G)).addTo(L_people);
     }
   }
+  // items (AirTags etc.)
+  for (const d of S.items) {
+    if (!visible(d)) continue;
+    const pt = lastAt(d.id, S.t) || (S.follow ? lastOf(d) : null); if (!pt) continue;
+    drawTrack(d, "#7a7f86", { weight: 2, dash: "4 4" });
+    L.marker([pt[1], pt[2]], { icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11], html: `<div class="dmark" style="background:#5e6b78;width:22px;height:22px;display:grid;place-items:center"><svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:#fff;stroke-width:2">${ICONS.tag}</svg></div>` }), title: d.name })
+      .bindPopup(() => fixPopup(d, pt, true)).addTo(L_people);
+  }
+  // every device separately
+  if (wantDevs) for (const p of S.people) for (const d of p.devices) {
+    if (!visible(d)) continue;
+    const pt = lastAt(d.id, S.t) || (S.follow ? lastOf(d) : null); if (!pt) continue;
+    L.marker([pt[1], pt[2]], { icon: L.divIcon({ className: "", iconSize: [14, 14], iconAnchor: [7, 7], html: `<div class="dmark" style="background:${p.color}"></div>` }), title: d.name })
+      .bindTooltip(d.name, { direction: "top", offset: [0, -6] }).bindPopup(() => fixPopup(d, pt, true)).addTo(L_devices);
+  }
+  if (wantHeat) L_heat.setLatLngs(heat);
+  renderPeople();
 }
-async function locateOne(d, btn) {
-  if (btn) btn.classList.add("spin");
-  toast(`Locating ${d.name}… (up to ~40 s)`, 40000);
+
+/* ---------------- popups ---------------- */
+function popupEl(html, handlers) {
+  const el = document.createElement("div"); el.className = "pop"; el.innerHTML = html;
+  el.addEventListener("click", (e) => { const a = e.target.dataset.a; if (a && handlers[a]) handlers[a](); });
+  return el;
+}
+function personPopup(p) {
+  const st = personStatus(p), [ts, lat, lon, acc] = st.pos.p, d = st.pos.dev;
+  const canLocate = d.source === "icloud";
+  return popupEl(`<h3>${esc(p.name)}</h3><p>${st.text}</p>
+    <table><tr><td>Fix</td><td>${esc(dt(ts))} (${esc(ago(ts))})</td></tr>
+    <tr><td>From</td><td>${esc(d.name)}</td></tr>
+    <tr><td>Accuracy</td><td>${acc != null ? `within ${Math.round(acc)} m` : "unknown"}</td></tr>
+    ${d.battery != null ? `<tr><td>Battery</td><td>${Math.round(d.battery * 100)}%</td></tr>` : ""}</table>
+    <div class="acts">${canLocate ? '<a data-a="locate">Locate now</a>' : ""}<a data-a="ins">Insights</a><a data-a="here">What's here?</a>
+    <a data-a="place">Make this a place</a><a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank" rel="noopener">Directions</a></div>`, {
+    locate: () => locateOne(d), ins: () => openInsights(d.id), here: () => whatsHere(lat, lon), place: () => newPlace(lat, lon),
+  });
+}
+function groupPopup(G) {
+  return popupEl(`<h3>${G.place ? `<span class="place-name">${esc(G.place.name)}</span>` : "Together"}</h3>
+    <table>${G.members.map(({ p, ts }) => `<tr><td>${esc(p.name)}</td><td>${esc(ago(ts))}</td></tr>`).join("")}</table>
+    <div class="acts">${G.place ? "" : '<a data-a="place">Make this a place</a>'}<a data-a="zoom">Zoom in</a></div>`, {
+    place: () => newPlace(G.lat, G.lon), zoom: () => fly([G.lat, G.lon], 19),
+  });
+}
+function fixPopup(d, p, current = false) {
+  const [ts, lat, lon, acc, batt, kind, meta] = p;
+  return popupEl(`<h3>${esc(d.name)}</h3>${d.owner ? `<p class="muted">${esc(d.owner)}</p>` : ""}
+    <table><tr><td>When</td><td>${esc(dt(ts))} (${esc(ago(ts))})</td></tr>
+    <tr><td>Accuracy</td><td>${acc != null ? `within ${Math.round(acc)} m` : "unknown"}</td></tr>
+    ${batt != null ? `<tr><td>Battery</td><td>${Math.round(batt * 100)}%</td></tr>` : ""}
+    ${kind ? `<tr><td>Source</td><td>${esc(kind)}</td></tr>` : ""}
+    ${meta && meta.file ? `<tr><td>Photo</td><td>${esc(String(meta.file).split("/").pop())}</td></tr>` : ""}
+    <tr><td>Position</td><td>${lat.toFixed(5)}, ${lon.toFixed(5)}</td></tr></table>
+    <div class="acts">${current && d.source === "icloud" ? '<a data-a="locate">Locate now</a>' : ""}<a data-a="here">What's here?</a>
+    <a data-a="place">Make this a place</a></div>`, {
+    locate: () => locateOne(d), here: () => whatsHere(lat, lon), place: () => newPlace(lat, lon),
+  });
+}
+function buildPhotos() {
+  L_photos.clearLayers();
+  for (const d of S.photoDevs) {
+    if (!visible(d) || !S.data[d.id]) continue;
+    L_photos.addLayers(S.data[d.id].map((p) => L.marker([p[1], p[2]], { icon: L.divIcon({ className: "photomark", iconSize: [10, 10] }) }).bindPopup(() => fixPopup(d, p))));
+  }
+}
+
+/* ---------------- people list ---------------- */
+function devSub(d) {
+  const p = lastAt(d.id, S.t) || lastOf(d);
+  const bits = [p ? ago(p[0]) : "no location"];
+  if (p && p[3]) bits.push(`within ${Math.round(p[3])} m`);
+  if (d.battery != null) bits.push(`${Math.round(d.battery * 100)}%${d.battery_status === "Charging" ? " charging" : ""}`);
+  return bits.join(", ");
+}
+function devRow(d) {
+  const row = document.createElement("div");
+  row.className = "dev" + (d.hidden ? " off" : "");
+  row.innerHTML = `${icon(d)}<span class="dev-name" title="${esc(d.model || "")}">${esc(d.name)}</span>
+    <button class="dev-more" aria-label="Actions for ${esc(d.name)}" aria-haspopup="menu" aria-expanded="false">⋯</button>
+    <span class="dev-sub">${esc(devSub(d))}</span>`;
+  row.addEventListener("click", (e) => {
+    if (e.target.closest(".dev-more")) return devMenu(d, e.target.closest(".dev-more"));
+    const p = lastAt(d.id, S.t) || lastOf(d);
+    if (p) { fly([p[1], p[2]], Math.max(map.getZoom(), 16)); showMarkerFor(d, p); }
+    else toast(`Apple has no location for ${d.name}. It's offline or has location turned off.`);
+  });
+  return row;
+}
+function renderPeople() {
+  const el = $("#peopleList"); el.innerHTML = "";
+  if (!S.devices.length) {
+    el.innerHTML = '<p class="muted">No one to show yet. Sign in to iCloud on the <a href="#setup" onclick="openTab(\'setup\')">Setup</a> tab and your family will appear here.</p>';
+    return;
+  }
+  for (const p of S.people) {
+    const st = personStatus(p), dev = st.pos ? st.pos.dev : p.carried[0];
+    const box = document.createElement("div"); box.className = "person";
+    const devs = p.devices.filter(visible);
+    const withFix = devs.filter((d) => d.last).sort((a, b) => b.last.ts - a.last.ts), noFix = devs.filter((d) => !d.last);
+    const open = S.expanded.has(p.name);
+    box.innerHTML = `<div class="person-main" tabindex="0" role="button" aria-label="Show ${esc(p.name)} on the map">
+        <div class="avatar" style="background:${p.color}">${esc(initials(p.name))}</div>
+        <div class="person-name">${esc(p.name)}</div>
+        <div class="person-side">${st.pos ? `<span>${esc(st.when)}</span>` : ""}${battHTML(dev)}</div>
+        <div class="person-status ${st.stale ? "stale" : ""}">${st.text}</div>
+      </div>
+      <div class="devs"><button class="devs-toggle" aria-expanded="${open}">${open ? "Hide" : "Show"} ${devs.length} device${devs.length === 1 ? "" : "s"}</button><div class="dev-list"></div></div>`;
+    const list = $(".dev-list", box);
+    if (open) {
+      withFix.forEach((d) => list.appendChild(devRow(d)));
+      if (noFix.length) {
+        const det = document.createElement("details"); det.className = "nofix";
+        det.innerHTML = `<summary class="devs-toggle">${noFix.length} without a location</summary>`;
+        noFix.forEach((d) => det.appendChild(devRow(d))); list.appendChild(det);
+      }
+    }
+    const go = () => { if (st.pos) fly([st.pos.p[1], st.pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${p.name} yet.`); if (isPhone()) $("#app").classList.add("noside"); };
+    $(".person-main", box).onclick = go;
+    $(".person-main", box).onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+    $(".avatar", box).title = "Change colour";
+    $(".avatar", box).onclick = (e) => { e.stopPropagation(); pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); }); };
+    $(".devs-toggle", box).onclick = () => { open ? S.expanded.delete(p.name) : S.expanded.add(p.name); store.set("expanded", [...S.expanded]); renderPeople(); };
+    el.appendChild(box);
+  }
+  const section = (title, devs) => {
+    const vis = devs.filter(visible); if (!vis.length) return;
+    el.insertAdjacentHTML("beforeend", `<div class="group-h">${esc(title)}</div>`);
+    const box = document.createElement("div"); box.className = "devs"; box.style.marginLeft = "0";
+    vis.forEach((d) => box.appendChild(devRow(d))); el.appendChild(box);
+  };
+  section("Items", S.items);
+  section("Photo history", S.photoDevs);
+}
+$("#showHidden").onchange = (e) => { S.showHidden = e.target.checked; computeRuns(); drawLanes(); render(); };
+function pickColor(cur, cb) { const i = document.createElement("input"); i.type = "color"; i.value = cur; i.onchange = () => cb(i.value); i.click(); }
+
+/* device actions menu */
+function openMenu(x, y, items, caption) {
+  const m = $("#ctxMenu");
+  m.innerHTML = (caption ? `<div class="cap">${esc(caption)}</div>` : "") + items.map((it, i) => `<button role="menuitem" data-i="${i}">${esc(it[0])}</button>`).join("");
+  m.classList.remove("hidden");
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, innerWidth - r.width - 8) + "px"; m.style.top = Math.min(y, innerHeight - r.height - 8) + "px";
+  m.onclick = (e) => { const b = e.target.closest("[data-i]"); if (!b) return; closeMenu(); items[+b.dataset.i][1](); };
+  $("button", m)?.focus();
+}
+function closeMenu() {
+  $("#ctxMenu").classList.add("hidden");
+  $$(".dev-more[aria-expanded=true]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#ctxMenu") && !e.target.closest(".dev-more")) closeMenu(); });
+function devMenu(d, btn) {
+  const r = btn.getBoundingClientRect(); btn.setAttribute("aria-expanded", "true");
+  const items = [];
+  if (d.source === "icloud" && (d.meta || {}).locationCapable !== false) items.push(["Locate now", () => locateOne(d)]);
+  if (d.last) items.push([`Show last known location (${ago(d.last.ts)})`, () => showLastKnown(d)]);
+  items.push(["Insights and battery history", () => openInsights(d.id)]);
+  items.push(["Rename", async () => { const n = prompt("Name for this device", d.name); if (n) { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n } }); await refreshAll(); } }]);
+  items.push([d.hidden ? "Show this device" : "Hide this device", async () => { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { hidden: d.hidden ? 0 : 1 } }); await refreshAll(); }]);
+  openMenu(r.left, r.bottom + 4, items, d.model || d.name);
+}
+function showMarkerFor(d, p) {
+  L_temp.clearLayers();
+  L.circleMarker([p[1], p[2]], { radius: 9, color: "#1e2b3a", weight: 2, fillOpacity: 0, dashArray: "3 3" }).addTo(L_temp);
+  setTimeout(() => L_temp.clearLayers(), 4000);
+}
+function showLastKnown(d) {
+  const p = lastOf(d); L_temp.clearLayers();
+  L.marker([p[1], p[2]], { icon: L.divIcon({ className: "lastknown", iconSize: [16, 16] }) })
+    .bindPopup(fixPopup(d, p, true)).addTo(L_temp).openPopup();
+  fly([p[1], p[2]], 17);
+  toast(`${d.name}: last known location, ${ago(p[0])}.`, 5000);
+}
+async function locateOne(d) {
+  toast(`Locating ${d.name}. This can take up to 40 seconds.`, 40000);
   try {
     const r = await api(`/api/icloud/locate/${encodeURIComponent(d.id)}`, { method: "POST" });
     await refreshAll();
-    toast(r.updated ? `${d.name}: new fix from ${ago(r.fix_ts)}` : `${d.name} didn't answer with a new fix (asleep, offline or no signal)`, 6000);
     const n = S.byId[d.id];
-    if (r.updated && n && n.last) map.setView([n.last.lat, n.last.lon], Math.max(map.getZoom(), 15));
+    if (r.updated && n && n.last) { fly([n.last.lat, n.last.lon], Math.max(map.getZoom(), 16)); toast(`Located ${d.name}.`, 5000); }
+    else toast(`${d.name} didn't send a new location. It may be asleep, offline or without signal.`, 6000);
   } catch (e) { toast(e.message, 6000); }
-  finally { if (btn) btn.classList.remove("spin"); }
-}
-$("#showHidden").onchange = (e) => { S.showHidden = e.target.checked; renderDeviceList(); render(); drawHisto(); };
-function fillDeviceSelects() {
-  const sel = $("#insDevice"), cur = sel.value;
-  sel.innerHTML = S.devices.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}${d.owner ? " · " + esc(d.owner) : ""}</option>`).join("");
-  if (cur && S.byId[cur]) sel.value = cur;
 }
 
 /* ---------------- tabs ---------------- */
 function openTab(name) {
-  $$("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $$("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.dataset.body !== name));
   $("#app").classList.remove("noside");
-  if (name === "alerts") loadEvents();
-  if (name === "settings") { loadStatus(); loadConfigForm(); }
+  if (name === "alerts") { loadEvents(); loadConfigForms(); }
+  if (name === "setup") { loadStatus(); loadConfigForms(); }
   if (name === "insights") loadInsights();
   if (name !== "insights") L_stays.clearLayers();
   history.replaceState(null, "", "#" + name);
+  setTimeout(() => map.invalidateSize(), 50);
 }
 window.openTab = openTab;
 $$("#tabs button").forEach((b) => (b.onclick = () => openTab(b.dataset.tab)));
-$("#sideToggle").onclick = () => { $("#app").classList.toggle("noside"); setTimeout(() => { map.invalidateSize(); drawHisto(); }, 50); };
+$("#tabs").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  const tabs = $$("#tabs button"), i = tabs.findIndex((b) => b.getAttribute("aria-selected") === "true");
+  const n = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length]; openTab(n.dataset.tab); n.focus();
+});
+$("#sideToggle").onclick = () => { $("#app").classList.toggle("noside"); setTimeout(() => { map.invalidateSize(); drawLanes(); }, 50); };
+$("#sheetHandle").onclick = () => $("#app").classList.add("noside");
 
-/* ---------------- places / geofences ---------------- */
+/* ---------------- places ---------------- */
 let placePreview = null;
 function renderPlaces() {
   L_places.clearLayers();
-  const el = $("#placeList"); el.innerHTML = S.fences.length ? "" : '<p class="muted small">No places yet.</p>';
+  const el = $("#placeList");
+  el.innerHTML = S.fences.length ? "" : '<p class="muted small">No places yet. Add Home first: it makes the timeline and alerts much more useful.</p>';
   for (const g of S.fences) {
-    L.circle([g.lat, g.lon], { radius: g.radius, color: g.color, weight: 2, fillOpacity: 0.1, dashArray: "6 4" })
-      .bindTooltip(g.name, { permanent: false, direction: "top" }).on("click", () => editPlace(g)).addTo(L_places);
-    const inside = g.inside.map((id) => S.byId[id]?.name).filter(Boolean);
-    const row = document.createElement("div"); row.className = "place";
-    row.innerHTML = `<span class="ring" style="border-color:${g.color}"></span><div><b>${esc(g.name)}</b>
-      <div class="sub">${Math.round(g.radius)} m · ${g.on_enter ? "arrive" : ""}${g.on_enter && g.on_exit ? " + " : ""}${g.on_exit ? "leave" : ""} alerts
-      ${g.devices.length ? ` · ${g.devices.length} device(s)` : ""}${inside.length ? `<br>Here now: ${esc(inside.join(", "))}` : ""}</div></div>`;
-    row.onclick = () => { map.setView([g.lat, g.lon], 16); editPlace(g); };
+    L.circle([g.lat, g.lon], { radius: g.radius, color: g.color, weight: 2, fillOpacity: 0.08, dashArray: "6 5" })
+      .on("click", () => editPlace(g)).addTo(L_places)
+;
+    L.tooltip({ permanent: true, direction: "bottom", className: "place-label", offset: [0, 2] })
+      .setLatLng([g.lat - g.radius / 111320, g.lon]).setContent(esc(g.name)).addTo(L_places);
+    const here = [...new Set(g.inside.map((id) => S.byId[id]?.owner || S.byId[id]?.name).filter(Boolean))];
+    const who = g.people?.length ? `for ${g.people.map(firstName).join(", ")}` : "for everyone";
+    const alerts = g.on_enter && g.on_exit ? "arrivals and departures" : g.on_enter ? "arrivals" : g.on_exit ? "departures" : "no alerts";
+    const row = document.createElement("div"); row.className = "place-row"; row.tabIndex = 0;
+    row.innerHTML = `<span class="ring" style="border-color:${g.color}"></span><div><div class="place-name">${esc(g.name)}</div>
+      <div class="sub">${Math.round(g.radius)} m, ${alerts} ${esc(who)}</div>${here.length ? `<div class="sub">Here now: ${esc(here.map(firstName).join(", "))}</div>` : ""}</div>`;
+    row.onclick = () => { fly([g.lat, g.lon], 16); editPlace(g); };
     el.appendChild(row);
   }
 }
 function showPlaceForm(g) {
   $("#placeForm").classList.remove("hidden");
-  $("#pfId").value = g.id || ""; $("#pfName").value = g.name || ""; $("#pfLat").value = g.lat?.toFixed(6) ?? "";
-  $("#pfLon").value = g.lon?.toFixed(6) ?? ""; $("#pfRadius").value = g.radius || 150; $("#pfColor").value = g.color || "#2563eb";
+  $("#pfId").value = g.id || ""; $("#pfName").value = g.name || "";
+  $("#pfLat").value = g.lat?.toFixed(6) ?? ""; $("#pfLon").value = g.lon?.toFixed(6) ?? "";
+  $("#pfRadius").value = g.radius || 150; $("#pfColor").value = g.color || "#9a6b43";
   $("#pfEnter").checked = g.on_enter ?? true; $("#pfExit").checked = g.on_exit ?? true;
   $("#pfDelete").classList.toggle("hidden", !g.id);
-  $("#pfDevices").innerHTML = S.devices.filter((d) => !isPhotos(d)).map((d) =>
-    `<label class="mini"><input type="checkbox" value="${esc(d.id)}" ${(g.devices || []).includes(d.id) ? "checked" : ""}> ${esc(d.name)}${d.owner ? " · " + esc(d.owner) : ""}</label>`).join("");
+  $("#pfPeople").innerHTML = S.people.map((p) => `<label class="toggle"><input type="checkbox" value="${esc(p.name)}" ${(g.people || []).includes(p.name) ? "checked" : ""}> ${esc(p.name)}</label>`).join("");
+  $("#pfItems").innerHTML = S.items.map((d) => `<label class="toggle"><input type="checkbox" value="${esc(d.id)}" ${(g.devices || []).includes(d.id) ? "checked" : ""}> ${esc(d.name)}</label>`).join("");
   updatePreview(); $("#pfName").focus();
 }
 function editPlace(g) { openTab("places"); showPlaceForm(g); }
-function newPlace(lat, lon) { openTab("places"); showPlaceForm({ lat, lon }); stopPicking(); }
+function newPlace(lat, lon, after) { S.afterPlaceSave = after || null; openTab("places"); showPlaceForm({ lat, lon }); stopPicking(); map.closePopup(); }
 function updatePreview() {
   const lat = parseFloat($("#pfLat").value), lon = parseFloat($("#pfLon").value), r = Number($("#pfRadius").value);
   $("#pfRadiusVal").textContent = r >= 1000 ? `${(r / 1000).toFixed(2)} km` : `${r} m`;
   if (placePreview) { map.removeLayer(placePreview.c); map.removeLayer(placePreview.m); placePreview = null; }
   if (isNaN(lat) || isNaN(lon)) return;
   const c = L.circle([lat, lon], { radius: r, color: $("#pfColor").value, weight: 2, fillOpacity: 0.15 }).addTo(map);
-  const m = L.marker([lat, lon], { draggable: true, title: "Drag to move" }).addTo(map);
-  m.on("drag", (e) => { c.setLatLng(e.target.getLatLng()); });
+  const m = L.marker([lat, lon], { draggable: true, title: "Drag to move the centre" }).addTo(map);
+  m.on("drag", (e) => c.setLatLng(e.target.getLatLng()));
   m.on("dragend", (e) => { const ll = e.target.getLatLng(); $("#pfLat").value = ll.lat.toFixed(6); $("#pfLon").value = ll.lng.toFixed(6); });
   placePreview = { c, m };
 }
@@ -475,42 +785,37 @@ function closePlaceForm() { $("#placeForm").classList.add("hidden"); if (placePr
 $("#pfCancel").onclick = closePlaceForm;
 $("#placeForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const body = { name: $("#pfName").value, lat: +$("#pfLat").value, lon: +$("#pfLon").value, radius: +$("#pfRadius").value,
+  const body = { name: $("#pfName").value.trim(), lat: +$("#pfLat").value, lon: +$("#pfLon").value, radius: +$("#pfRadius").value,
     color: $("#pfColor").value, on_enter: $("#pfEnter").checked, on_exit: $("#pfExit").checked,
-    devices: $$("#pfDevices input:checked").map((i) => i.value) };
+    people: $$("#pfPeople input:checked").map((i) => i.value), devices: $$("#pfItems input:checked").map((i) => i.value) };
   const id = $("#pfId").value;
   await api(id ? `/api/geofences/${id}` : "/api/geofences", { method: id ? "PUT" : "POST", body });
-  closePlaceForm(); await loadFences(); toast("Place saved");
+  closePlaceForm(); await loadFences(); computeRuns(); drawLanes(); render();
+  toast(`Saved ${body.name}.`);
+  if (S.afterPlaceSave) { const f = S.afterPlaceSave; S.afterPlaceSave = null; f(); }
 });
 $("#pfDelete").onclick = async () => {
-  if (!confirm("Delete this place?")) return;
-  await api(`/api/geofences/${$("#pfId").value}`, { method: "DELETE" }); closePlaceForm(); loadFences();
+  if (!confirm(`Delete ${$("#pfName").value}? Its alerts stop too.`)) return;
+  await api(`/api/geofences/${$("#pfId").value}`, { method: "DELETE" }); closePlaceForm(); await loadFences(); computeRuns(); drawLanes(); render();
 };
 function stopPicking() { S.picking = false; $("#app").classList.remove("picking"); }
-$("#addPlaceBtn").onclick = () => { closePlaceForm(); S.picking = true; $("#app").classList.add("picking"); toast("Click the map to place the centre"); };
-map.on("click", (e) => { if (S.picking) newPlace(e.latlng.lat, e.latlng.lng); hideCtx(); });
+$("#addPlaceBtn").onclick = () => { closePlaceForm(); S.picking = true; $("#app").classList.add("picking"); toast("Click the map where the place is."); };
+map.on("click", (e) => { if (S.picking) newPlace(e.latlng.lat, e.latlng.lng); closeMenu(); });
 
-/* ---------------- context menu ---------------- */
-function hideCtx() { $("#ctxMenu").classList.add("hidden"); }
+/* ---------------- map context menu ---------------- */
 map.on("contextmenu", (e) => {
-  const { lat, lng } = e.latlng, m = $("#ctxMenu");
-  m.innerHTML = `<div class="cap">${lat.toFixed(5)}, ${lng.toFixed(5)}</div><div data-a="here">What's here?</div>
-    <div data-a="place">Create place here</div><div data-a="copy">Copy coordinates</div><div data-a="center">Centre map here</div>`;
-  const pt = e.containerPoint, wrap = $(".mapwrap").getBoundingClientRect();
-  m.style.left = Math.min(pt.x, wrap.width - 200) + "px"; m.style.top = Math.min(pt.y, wrap.height - 170) + "px";
-  m.classList.remove("hidden");
-  m.onclick = (ev) => {
-    const a = ev.target.dataset.a; if (!a) return; hideCtx();
-    if (a === "here") whatsHere(lat, lng);
-    if (a === "place") newPlace(lat, lng);
-    if (a === "copy") navigator.clipboard?.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`).then(() => toast("Copied"), () => toast(`${lat.toFixed(6)}, ${lng.toFixed(6)}`));
-    if (a === "center") map.panTo([lat, lng]);
-  };
+  const { lat, lng } = e.latlng, oe = e.originalEvent;
+  openMenu(oe.clientX, oe.clientY, [
+    ["What's here?", () => whatsHere(lat, lng)],
+    ["Create place here", () => newPlace(lat, lng)],
+    ["Copy coordinates", () => navigator.clipboard?.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`).then(() => toast("Copied coordinates."), () => toast(`${lat.toFixed(6)}, ${lng.toFixed(6)}`))],
+    ["Centre the map here", () => map.panTo([lat, lng])],
+  ], `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
 });
 async function whatsHere(lat, lon) {
   try {
     const r = await api(`/api/reverse?lat=${lat}&lon=${lon}`);
-    L.popup().setLatLng([lat, lon]).setContent(`<div class="pop"><b>${esc(r.name || "Unknown")}</b><br><code>${lat.toFixed(5)}, ${lon.toFixed(5)}</code></div>`).openOn(map);
+    L.popup().setLatLng([lat, lon]).setContent(`<div class="pop"><b>${esc(r.name || "No address found")}</b><br><span class="muted">${lat.toFixed(5)}, ${lon.toFixed(5)}</span></div>`).openOn(map);
   } catch (e) { toast(e.message); }
 }
 
@@ -519,20 +824,22 @@ const sInput = $("#search"), sBox = $("#searchResults");
 let sTimer = null, sItems = [], sSel = -1;
 function localMatches(q) {
   const lq = q.toLowerCase(), out = [];
-  for (const d of S.devices) if (`${d.name} ${d.owner || ""} ${d.model || ""}`.toLowerCase().includes(lq)) {
-    const p = d.last ? [d.last.ts, d.last.lat, d.last.lon] : lastAt(d.id, S.end);
-    if (p) out.push({ g: "People & devices", name: `${d.name}${d.owner ? " · " + d.owner : ""}`, lat: p[1], lon: p[2], z: 16, sub: ago(p[0]) });
+  for (const p of S.people) if (p.name.toLowerCase().includes(lq)) {
+    const pos = personPos(p, now() + 60) || personPos(p);
+    if (pos) out.push({ g: "People", name: p.name, lat: pos.p[1], lon: pos.p[2], z: 16, sub: ago(pos.p[0]) });
   }
+  for (const d of S.devices) if (`${d.name} ${d.model || ""}`.toLowerCase().includes(lq) && d.last)
+    out.push({ g: "Devices", name: `${d.name}${d.owner ? ", " + firstName(d.owner) : ""}`, lat: d.last.lat, lon: d.last.lon, z: 17, sub: ago(d.last.ts) });
   for (const g of S.fences) if (g.name.toLowerCase().includes(lq)) out.push({ g: "Places", name: g.name, lat: g.lat, lon: g.lon, z: 16, sub: `${Math.round(g.radius)} m` });
   const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
-  if (m && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180) out.unshift({ g: "Coordinates", name: `${(+m[1]).toFixed(5)}, ${(+m[2]).toFixed(5)}`, lat: +m[1], lon: +m[2], z: 16, pin: true });
-  return out;
+  if (m && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180) out.unshift({ g: "Coordinates", name: `${(+m[1]).toFixed(5)}, ${(+m[2]).toFixed(5)}`, lat: +m[1], lon: +m[2], z: 17, pin: true });
+  return out.slice(0, 20);
 }
 function showResults(items, loading = false) {
   sItems = items; sSel = -1;
-  if (!items.length && !loading) { sBox.innerHTML = '<div class="sh">No matches. Press Enter to search addresses.</div>'; sBox.classList.remove("hidden"); return; }
+  if (!items.length && !loading) { sBox.innerHTML = '<div class="sh">Nothing matches. Press Enter to search addresses.</div>'; sBox.classList.remove("hidden"); return; }
   let html = "", lastG = "";
-  items.forEach((it, i) => { if (it.g !== lastG) { html += `<div class="sh">${esc(it.g)}</div>`; lastG = it.g; } html += `<div class="sr" data-i="${i}"><span>${esc(it.name)}</span>${it.sub ? `<small>${esc(it.sub)}</small>` : ""}</div>`; });
+  items.forEach((it, i) => { if (it.g !== lastG) { html += `<div class="sh">${esc(it.g)}</div>`; lastG = it.g; } html += `<div class="sr" role="option" data-i="${i}"><span>${esc(it.name)}</span>${it.sub ? `<small>${esc(it.sub)}</small>` : ""}</div>`; });
   if (loading) html += '<div class="sh">Searching addresses…</div>';
   sBox.innerHTML = html; sBox.classList.remove("hidden");
 }
@@ -546,19 +853,14 @@ async function geoSearch(q) {
   } catch (e) { showResults(local); toast(e.message); }
 }
 function pick(it) {
-  sBox.classList.add("hidden"); L_search.clearLayers();
+  sBox.classList.add("hidden"); L_temp.clearLayers();
   if (it.bbox && it.bbox.length === 4) map.fitBounds([[it.bbox[0], it.bbox[2]], [it.bbox[1], it.bbox[3]]], { maxZoom: 17 });
-  else map.setView([it.lat, it.lon], it.z || 16);
-  if (it.pin) {
-    const el = document.createElement("div"); el.className = "pop";
-    el.innerHTML = `<b>${esc(it.name)}</b><div class="acts"><a data-a="place">Make a place</a></div>`;
-    el.onclick = (e) => { if (e.target.dataset.a === "place") newPlace(it.lat, it.lon); };
-    L.marker([it.lat, it.lon]).bindPopup(el).addTo(L_search).openPopup();
-  }
+  else fly([it.lat, it.lon], it.z || 16);
+  if (it.pin) L.marker([it.lat, it.lon]).bindPopup(popupEl(`<b>${esc(it.name)}</b><div class="acts"><a data-a="place">Make this a place</a></div>`, { place: () => newPlace(it.lat, it.lon) })).addTo(L_temp).openPopup();
 }
 sInput.addEventListener("input", () => {
   const q = sInput.value.trim(); clearTimeout(sTimer);
-  if (!q) { sBox.classList.add("hidden"); L_search.clearLayers(); return; }
+  if (!q) { sBox.classList.add("hidden"); L_temp.clearLayers(); return; }
   showResults(localMatches(q));
   if (q.length >= 4) sTimer = setTimeout(() => geoSearch(q), 900);
 });
@@ -576,120 +878,160 @@ sBox.addEventListener("click", (e) => { const r = e.target.closest(".sr"); if (r
 document.addEventListener("click", (e) => { if (!e.target.closest(".search")) sBox.classList.add("hidden"); });
 
 /* ---------------- insights ---------------- */
+function fillDeviceSelect() {
+  const sel = $("#insDevice"), cur = sel.value;
+  const opt = (d) => `<option value="${esc(d.id)}">${esc(d.name)}${d.last ? "" : " (no location)"}</option>`;
+  sel.innerHTML = S.people.map((p) => `<optgroup label="${esc(p.name)}">${p.devices.map(opt).join("")}</optgroup>`).join("") +
+    (S.items.length ? `<optgroup label="Items">${S.items.map(opt).join("")}</optgroup>` : "") +
+    (S.photoDevs.length ? `<optgroup label="Photo history">${S.photoDevs.map(opt).join("")}</optgroup>` : "");
+  if (cur && S.byId[cur]) sel.value = cur;
+  else { const p = S.people.find((x) => primaryOf(x) || x.carried.length); const d = p && (primaryOf(p) || p.carried[0]); if (d) sel.value = d.id; }
+}
+function openInsights(id) { $("#insDevice").value = id; openTab("insights"); }
 $("#insDevice").onchange = loadInsights;
+function svgBars(rows, color) {
+  const w = 300, h = 80, n = rows.length, max = Math.max(0.01, ...rows.map((r) => r.km)), bw = w / n;
+  return `<svg class="chart" viewBox="0 0 ${w} ${h + 14}" preserveAspectRatio="none" role="img" aria-label="Distance per day">
+    ${rows.map((r, i) => `<rect x="${(i * bw + 1).toFixed(1)}" y="${(h - (r.km / max) * h).toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${((r.km / max) * h).toFixed(1)}" fill="${color}"><title>${r.day}: ${r.km} km</title></rect>`).join("")}
+    <line class="ax" x1="0" y1="${h}" x2="${w}" y2="${h}"/><text x="0" y="${h + 12}">${esc(rows[0].day)}</text><text x="${w}" y="${h + 12}" text-anchor="end">${esc(rows[n - 1].day)}</text></svg>`;
+}
+function svgBattery(pts) {
+  const w = 300, h = 80, X = (t) => ((t - S.start) / (S.end - S.start || 1)) * w, Y = (b) => h - b * h;
+  const line = pts.map((p) => `${X(p[0]).toFixed(1)},${Y(p[4]).toFixed(1)}`).join(" ");
+  return `<svg class="chart" viewBox="0 0 ${w} ${h + 14}" preserveAspectRatio="none" role="img" aria-label="Battery level over time">
+    <line class="ax" x1="0" y1="${Y(0.2)}" x2="${w}" y2="${Y(0.2)}" stroke-dasharray="3 3"/><line class="ax" x1="0" y1="${h}" x2="${w}" y2="${h}"/>
+    <polyline points="${line}" fill="none" stroke="var(--wood)" stroke-width="1.8" vector-effect="non-scaling-stroke"/>
+    <text x="0" y="${h + 12}">${esc(fmtD.format(new Date(S.start * 1000)))}</text><text x="${w}" y="${h + 12}" text-anchor="end">${esc(fmtD.format(new Date(S.end * 1000)))}</text>
+    <text x="${w}" y="${Y(0.2) - 3}" text-anchor="end">20%</text></svg>`;
+}
 async function loadInsights() {
-  const id = $("#insDevice").value; const body = $("#insBody");
+  const id = $("#insDevice").value, body = $("#insBody");
   L_stays.clearLayers();
-  if (!id) { body.innerHTML = '<p class="muted">No devices yet.</p>'; return; }
-  body.innerHTML = '<p class="muted">Analysing…</p>';
+  $("#insRange").textContent = `From ${dt(S.start)} to ${dt(S.end)}. Change the range on the timeline.`;
+  if (!id) { body.innerHTML = '<p class="muted">Nothing to analyse yet.</p>'; return; }
+  body.innerHTML = '<p class="muted">Working it out…</p>';
   const r = await api(`/api/analysis?device=${encodeURIComponent(id)}&start=${S.start}&end=${S.end}`);
-  S.insights = r;
-  const d = S.byId[id]; const color = d?.color || "#2563eb";
-  const maxKm = Math.max(0.01, ...r.per_day_km.map((x) => x.km));
-  const stayTime = r.stays.reduce((a, s) => a + s.minutes, 0);
+  const d = S.byId[id], person = d && S.personByName[d.owner], color = person ? person.color : "#3f7fa3";
+  const stayMin = r.stays.reduce((a, s) => a + s.minutes, 0);
+  const batt = (S.data[id] || []).filter((p) => p[4] != null);
+  const unnamed = (x) => !x.place && !/[a-z]/i.test(x.name || "");
   body.innerHTML = `
-    <div class="stat-grid">
+    <div class="stats">
       <div class="stat"><b>${r.km}</b><span>km travelled</span></div>
       <div class="stat"><b>${r.trips.length}</b><span>trips</span></div>
       <div class="stat"><b>${r.stays.length}</b><span>stays</span></div>
+      <div class="stat"><b>${dur(stayMin)}</b><span>time at stays</span></div>
+      <div class="stat"><b>${r.farthest_from_start_km}</b><span>km furthest out</span></div>
       <div class="stat"><b>${r.points}</b><span>fixes</span></div>
-      <div class="stat"><b>${dur(stayTime)}</b><span>time at stays</span></div>
-      <div class="stat"><b>${r.farthest_from_start_km}</b><span>km max from start</span></div>
     </div>
-    ${r.per_day_km.length > 1 ? `<h3>Distance per day</h3><div class="bars">${r.per_day_km.map((x) => `<i title="${x.day}: ${x.km} km" style="height:${(x.km / maxKm) * 100}%;background:${color}"></i>`).join("")}</div>
-      <div class="row between small muted"><span>${r.per_day_km[0].day}</span><span>${r.per_day_km.at(-1).day}</span></div>` : ""}
-    <h3>Top places</h3><div class="ins-list" id="insPlaces">${r.top_places.map((p, i) => `<div data-i="${i}"><span>${esc(p.name)}</span><span class="muted">${p.visits}× · ${dur(p.hours * 60)}</span></div>`).join("") || '<span class="muted">none</span>'}</div>
-    <h3>Stays</h3><div class="ins-list" id="insStays">${r.stays.slice().reverse().map((s, i) => `<div data-i="${r.stays.length - 1 - i}"><span>${esc(s.place || `${s.lat.toFixed(4)}, ${s.lon.toFixed(4)}`)}</span><span class="muted">${fmtDT.format(new Date(s.start * 1000))} · ${dur(s.minutes)}</span></div>`).join("") || '<span class="muted">none</span>'}</div>
-    <h3>Trips</h3><div class="ins-list" id="insTrips">${r.trips.slice().reverse().map((t, i) => `<div data-i="${r.trips.length - 1 - i}"><span>${t.km} km · ${dur(t.minutes)}${t.avg_kmh ? ` · ${t.avg_kmh} km/h` : ""}</span><span class="muted">${fmtDT.format(new Date(t.start * 1000))}</span></div>`).join("") || '<span class="muted">none</span>'}</div>`;
-  for (const s of r.stays) L.circleMarker([s.lat, s.lon], { radius: Math.min(22, 5 + Math.sqrt(s.minutes)), color, weight: 2, fillOpacity: 0.25 })
-    .bindTooltip(`${esc(s.place || "Stay")}<br>${dt(s.start)}<br>${dur(s.minutes)}`).addTo(L_stays);
-  $("#insPlaces").onclick = (e) => { const x = e.target.closest("[data-i]"); if (x) { const p = r.top_places[+x.dataset.i]; map.setView([p.lat, p.lon], 16); } };
-  $("#insStays").onclick = (e) => { const x = e.target.closest("[data-i]"); if (x) { const s = r.stays[+x.dataset.i]; map.setView([s.lat, s.lon], 16); stopPlay(); S.t = s.end; render(); } };
+    ${r.per_day_km.length > 1 ? `<div class="ins-h">Distance per day</div>${svgBars(r.per_day_km, color)}` : ""}
+    ${batt.length > 1 ? `<div class="ins-h">Battery</div>${svgBattery(batt)}` : ""}
+    <div class="ins-h">Places visited most</div><div class="ins-list" id="insPlaces">${r.top_places.map((p, i) => `<div class="ins-item" data-i="${i}">
+      <span>${unnamed(p) ? `Unnamed spot <button class="name-it" data-name="${i}">Name this place</button>` : `<span class="place-name">${esc(p.name)}</span>`}</span>
+      <span class="muted">${p.visits} visit${p.visits === 1 ? "" : "s"}, ${dur(p.hours * 60)}</span></div>`).join("") || '<p class="muted small">No stays in this range.</p>'}</div>
+    <div class="ins-h">Stays</div><div class="ins-list" id="insStays">${r.stays.map((s, i) => [s, i]).reverse().map(([s, i]) => `<div class="ins-item" data-i="${i}">
+      <span>${s.place ? `<span class="place-name">${esc(s.place)}</span>` : `Unnamed spot <button class="name-it" data-stay="${i}">Name this place</button>`}</span>
+      <span class="muted">${dur(s.minutes)}</span><span class="when">${esc(dt(s.start))}</span></div>`).join("") || '<p class="muted small">No stays in this range.</p>'}</div>
+    <div class="ins-h">Trips</div><div class="ins-list" id="insTrips">${r.trips.map((t, i) => [t, i]).reverse().map(([t, i]) => `<div class="ins-item" data-i="${i}">
+      <span>${t.km} km in ${dur(t.minutes)}</span><span class="muted">${t.avg_kmh ? `${t.avg_kmh} km/h average` : ""}</span><span class="when">${esc(dt(t.start))}</span></div>`).join("") || '<p class="muted small">No trips in this range.</p>'}</div>`;
+  for (const s of r.stays) L.circleMarker([s.lat, s.lon], { radius: Math.min(22, 5 + Math.sqrt(s.minutes)), color, weight: 2, fillOpacity: 0.22 })
+    .bindTooltip(`${s.place ? esc(s.place) : "Stay"}<br>${esc(dt(s.start))}<br>${dur(s.minutes)}`).addTo(L_stays);
+  const again = () => loadInsights();
+  $("#insPlaces").onclick = (e) => {
+    const nb = e.target.closest("[data-name]"); if (nb) { const p = r.top_places[+nb.dataset.name]; return newPlace(p.lat, p.lon, again); }
+    const x = e.target.closest("[data-i]"); if (x) { const p = r.top_places[+x.dataset.i]; fly([p.lat, p.lon], 16); }
+  };
+  $("#insStays").onclick = (e) => {
+    const nb = e.target.closest("[data-stay]"); if (nb) { const s = r.stays[+nb.dataset.stay]; return newPlace(s.lat, s.lon, again); }
+    const x = e.target.closest("[data-i]"); if (x) { const s = r.stays[+x.dataset.i]; fly([s.lat, s.lon], 16); stopPlay(); S.t = s.end; S.follow = false; render(); }
+  };
   $("#insTrips").onclick = (e) => {
     const x = e.target.closest("[data-i]"); if (!x) return; const t = r.trips[+x.dataset.i];
     const seg = (S.data[id] || []).filter((p) => p[0] >= t.start && p[0] <= t.end).map((p) => [p[1], p[2]]);
     map.fitBounds(seg.length > 1 ? seg : [t.from, t.to], { padding: [50, 50], maxZoom: 16 });
-    stopPlay(); S.t = t.end; render();
+    stopPlay(); S.t = t.end; S.follow = false; render();
   };
 }
 
-/* ---------------- events ---------------- */
+/* ---------------- alerts tab ---------------- */
 $("#evKind").onchange = loadEvents;
 async function loadEvents() {
   const ev = await api(`/api/events?limit=300&kind=${$("#evKind").value}`);
-  $("#eventList").innerHTML = ev.map((e) => `<div class="ev"><span class="k ${esc(e.kind)}">${esc(e.kind)}</span><span>${esc(e.message).replace(/\n/g, "<br>")}</span>
-    <span class="t">${dt(e.ts)}${e.emailed ? " · emailed" : e.email_error ? ` · email failed: ${esc(e.email_error)}` : ""}</span></div>`).join("") || '<p class="muted">No events yet.</p>';
+  $("#eventList").innerHTML = ev.map((e) => `<div class="ev"><i class="${esc(e.kind)}"></i><span>${esc(e.message).replace(/\n/g, "<br>").replace(/(https:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">map</a>')}</span>
+    <span class="t">${esc(dt(e.ts))}${e.emailed ? ", emailed" : e.email_error === "quiet hours" ? ", not emailed (quiet hours)" : e.email_error ? `, email failed: ${esc(e.email_error)}` : ""}</span></div>`).join("") || '<p class="muted">Nothing has happened yet. Arrivals, departures and warnings will be listed here.</p>';
 }
+const ALERT_KEYS = ["quiet_from_hour", "quiet_to_hour", "digest_hour", "low_battery_pct", "stale_hours", "geofence_exit_margin_m", "max_alert_accuracy_m"];
+const TRACK_KEYS = ["poll_seconds", "locate_minutes", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];
+async function loadConfigForms() {
+  const rows = await api("/api/config");
+  const html = (keys, note) => rows.filter((r) => keys.includes(r.key)).map((r) => `<label class="cfg-row"><span>${esc(r.label)} <span class="u">${esc(r.unit)}</span></span>
+    <input type="number" name="${r.key}" min="${r.min}" max="${r.max}" step="any" value="${r.value}"></label>`).join("") +
+    `<div class="row gap end"><span class="muted small" style="margin-right:auto">${note}</span><button class="btn small primary">Save settings</button></div>`;
+  $("#alertCfg").innerHTML = html(ALERT_KEYS, "Hours are 0 to 23, local time.");
+  $("#trackCfg").innerHTML = html(TRACK_KEYS, "Fresh fixes wake family devices and use battery.");
+}
+for (const id of ["alertCfg", "trackCfg"]) $("#" + id).addEventListener("submit", (e) => {
+  e.preventDefault();
+  busy(e.submitter, async () => {
+    const body = Object.fromEntries([...new FormData(e.target)].map(([k, v]) => [k, Number(v)]));
+    await api("/api/config", { method: "PUT", body }); await loadConfigForms(); toast("Saved settings.");
+  });
+});
+$("#digestPreview").onclick = (e) => busy(e.target, async () => { const r = await api("/api/digest"); const b = $("#digestBox"); b.textContent = `${r.subject}\n\n${r.body}`; b.classList.remove("hidden"); });
+$("#digestSend").onclick = (e) => busy(e.target, async () => { await api("/api/digest/send", { method: "POST" }); toast("Emailed the summary."); });
 
-/* ---------------- status / settings ---------------- */
+/* ---------------- setup tab ---------------- */
 const stateBadge = (s) => ({ ok: "ok", need_2fa: "warn", need_login: "bad", error: "bad" }[s] || "");
+const stateWord = (s) => ({ ok: "connected", need_2fa: "waiting for code", need_login: "sign in again", logged_out: "not signed in", error: "error" }[s] || s);
 async function loadStatus() {
   const st = await api("/api/status");
   const ic = st.icloud, at = st.airtag;
   $("#chips").innerHTML = [["iCloud", ic.state], ["AirTags", at.state], ["Email", st.email.configured ? "ok" : "off"]]
-    .map(([n, s]) => `<span class="chip ${stateBadge(s)}" onclick="openTab('settings')" title="${esc(s)}"><i></i>${n}</span>`).join("");
-  $("#icState").textContent = ic.state; $("#icState").className = "badge " + stateBadge(ic.state);
-  $("#icDetail").textContent = [ic.apple_id, ic.detail].filter(Boolean).join(" · ");
+    .map(([n, s]) => `<button class="chip ${stateBadge(s)}" onclick="openTab('setup')" title="${esc(n)}: ${esc(stateWord(s))}"><i></i>${n}</button>`).join("");
+  $("#icState").textContent = stateWord(ic.state); $("#icState").className = "badge " + stateBadge(ic.state);
+  $("#icDetail").textContent = [ic.apple_id, ic.detail].filter(Boolean).join(". ");
   $("#icLogin").classList.toggle("hidden", !["logged_out", "need_login"].includes(ic.state));
   $("#ic2fa").classList.toggle("hidden", ic.state !== "need_2fa");
   $("#icActions").classList.toggle("hidden", ic.state !== "ok");
   if (ic.apple_id && !$("#icId").value) $("#icId").value = ic.apple_id;
-  $("#icStats").textContent = `last poll ${ago(ic.last_poll)} · last fresh locate ${ago(ic.last_locate)} · ${ic.devices} devices · ${ic.new_points} new fixes · ${ic.poll_errors} errors`;
-  $("#atState").textContent = at.state; $("#atState").className = "badge " + stateBadge(at.state);
+  $("#icStats").textContent = `Last check ${ago(ic.last_poll)}, last fresh locate ${ago(ic.last_locate)}. ${ic.devices} devices, ${ic.new_points} new fixes and ${ic.poll_errors} errors since the app started.`;
+  $("#atState").textContent = stateWord(at.state); $("#atState").className = "badge " + stateBadge(at.state);
   $("#atDetail").textContent = at.detail;
-  $("#atKeys").textContent = at.key_files.length ? at.key_files.join(", ") : "none";
+  $("#atKeys").textContent = at.key_files.length ? at.key_files.join(", ") : "none yet";
   $("#atDir").textContent = at.tag_dir;
   $("#atLogin").classList.toggle("hidden", !["logged_out", "need_login"].includes(at.state));
   $("#at2fa").classList.toggle("hidden", at.state !== "need_2fa");
   $("#atActions").classList.toggle("hidden", at.state !== "ok");
   const ph = st.photos;
-  $("#phStatus").textContent = ph.kind ? `${ph.running ? "Running" : "Last run"} (${ph.kind}): ${ph.scanned} scanned, ${ph.with_gps} with GPS, ${ph.new} new${ph.error ? " · error: " + ph.error : ""}` : "";
-  $("#emState").textContent = st.email.configured ? "configured" : "not configured"; $("#emState").className = "badge " + (st.email.configured ? "ok" : "bad");
-  $("#emDetail").textContent = st.email.configured ? `to ${st.email.recipient} · ${st.email.emails_sent} sent, ${st.email.emails_failed} failed` : "Set email_address / email_app_password in data/config.toml";
+  $("#phStatus").textContent = ph.kind ? `${ph.running ? "Importing" : "Last import"}: ${ph.scanned} photos checked, ${ph.with_gps} with a location, ${ph.new} added${ph.error ? `. Error: ${ph.error}` : ""}` : "";
+  $("#emState").textContent = st.email.configured ? "set up" : "not set up"; $("#emState").className = "badge " + (st.email.configured ? "ok" : "bad");
+  $("#emDetail").textContent = st.email.configured ? `Alerts go to ${st.email.recipient}. ${st.email.emails_sent} sent, ${st.email.emails_failed} failed since the app started.` : "Add email_address and email_app_password to data/config.toml, then restart the app.";
   const bk = st.backup;
-  $("#storageLine").textContent = `${st.storage.points.toLocaleString()} fixes stored in ${st.storage.db} (on disk, survives reboot)` +
-    (bk ? ` · last daily backup ${ago(bk.ts)}, ${(bk.bytes / 1024).toFixed(0)} KB, 14 kept in data/backups/` : " · first backup pending");
-  const c = st.config;
-  $("#cfgLine").textContent = `v${st.version} · poll ${c.poll_seconds}s · fresh locate every ${c.locate_minutes} min · AirTags every ${c.airtag_poll_minutes} min · low battery ${c.low_battery_pct}% · stale ${c.stale_hours} h · stays ≥${c.stay_min_minutes} min within ${c.stay_radius_m} m`;
+  $("#storageLine").textContent = `${st.storage.points.toLocaleString()} fixes saved on disk in ${st.storage.db}. ` + (bk ? `Last daily backup ${ago(bk.ts)} (${(bk.bytes / 1024).toFixed(0)} KB); 14 are kept.` : "The first backup hasn't run yet.");
+  $("#cfgLine").textContent = `Version ${st.version}.`;
   return st;
 }
-const busy = async (btn, fn) => { btn.disabled = true; try { await fn(); } catch (e) { toast(e.message, 5000); } finally { btn.disabled = false; loadStatus(); } };
-$("#icLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/login", { method: "POST", body: { apple_id: $("#icId").value, password: $("#icPw").value } }); $("#icPw").value = ""; toast(r.detail || r.state); }); });
-$("#ic2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/2fa", { method: "POST", body: { code: $("#icCode").value } }); $("#icCode").value = ""; toast(r.detail || r.state); if (r.state === "ok") setTimeout(refreshAll, 4000); }); });
+const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch (e) { toast(e.message, 6000); } finally { if (btn) btn.disabled = false; loadStatus().catch(() => {}); } };
+$("#icLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/login", { method: "POST", body: { apple_id: $("#icId").value, password: $("#icPw").value } }); $("#icPw").value = ""; toast(r.detail || stateWord(r.state)); }); });
+$("#ic2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/2fa", { method: "POST", body: { code: $("#icCode").value } }); $("#icCode").value = ""; toast(r.state === "ok" ? "Connected to iCloud." : r.detail); if (r.state === "ok") setTimeout(refreshAll, 4000); }); });
 $("#icSms").onclick = (e) => busy(e.target, async () => toast((await api("/api/icloud/sms", { method: "POST" })).detail));
-$("#icPoll").onclick = (e) => busy(e.target, locateNow);
-$("#icLogout").onclick = (e) => { if (confirm("Sign out of iCloud and delete the saved session?")) busy(e.target, () => api("/api/icloud/logout", { method: "POST" })); };
-$("#atLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/airtag/login", { method: "POST", body: { apple_id: $("#atId").value, password: $("#atPw").value } }); $("#atPw").value = ""; toast(r.detail || r.state); }); });
-$("#at2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/airtag/2fa", { method: "POST", body: { code: $("#atCode").value } }); toast(r.detail || r.state); }); });
-$("#atPoll").onclick = (e) => busy(e.target, async () => { await api("/api/airtag/poll", { method: "POST" }); await refreshAll(); });
+$("#icPoll").onclick = (e) => busy(e.target, async () => { toast("Locating everyone. This takes about 20 seconds.", 25000); await api("/api/icloud/poll?locate=true", { method: "POST" }); await refreshAll(); toast("Located everyone who answered."); });
+$("#icLogout").onclick = (e) => { if (confirm("Sign out of iCloud? Tracking stops until you sign in again.")) busy(e.target, () => api("/api/icloud/logout", { method: "POST" })); };
+$("#atLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/airtag/login", { method: "POST", body: { apple_id: $("#atId").value, password: $("#atPw").value } }); $("#atPw").value = ""; toast(r.detail || stateWord(r.state)); }); });
+$("#at2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/airtag/2fa", { method: "POST", body: { code: $("#atCode").value } }); toast(r.detail || stateWord(r.state)); }); });
+$("#atPoll").onclick = (e) => busy(e.target, async () => { await api("/api/airtag/poll", { method: "POST" }); await refreshAll(); toast("Fetched AirTags."); });
 $("#atLogout").onclick = (e) => busy(e.target, () => api("/api/airtag/logout", { method: "POST" }));
-$("#phIcloud").onclick = (e) => busy(e.target, async () => { await api("/api/photos/icloud", { method: "POST", body: {} }); toast("Import started"); pollPhotos(); });
-$("#phFolder").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/photos/folder", { method: "POST", body: { path: $("#phPath").value } }); if (r.error) throw new Error(r.error); toast("Import started"); pollPhotos(); }); });
-function pollPhotos() { const iv = setInterval(async () => { const st = await loadStatus(); if (!st.photos.running) { clearInterval(iv); await loadDevices(); loadPoints(); } }, 3000); }
-$("#emTest").onclick = (e) => busy(e.target, async () => toast("Sent to " + (await api("/api/email/test", { method: "POST" })).to));
-$("#pwChange").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { await api("/api/auth/change", { method: "POST", body: { old: $("#pwOld").value, new: $("#pwNew").value } }); $("#pwOld").value = $("#pwNew").value = ""; toast("Password changed"); }); });
-async function loadConfigForm() {
-  const rows = await api("/api/config");
-  $("#cfgForm").innerHTML = rows.map((r) => `<label class="cfg-row"><span>${esc(r.label)} <span class="u">(${esc(r.unit)})</span></span>
-    <input type="number" name="${r.key}" min="${r.min}" max="${r.max}" step="any" value="${r.value}"></label>`).join("") +
-    '<div class="row gap end"><span class="muted small" style="margin-right:auto">Fresh fixes wake family devices (battery). Applied immediately.</span><button class="btn small primary">Save</button></div>';
-}
-$("#cfgForm").addEventListener("submit", (e) => {
-  e.preventDefault();
-  busy(e.submitter, async () => {
-    const body = Object.fromEntries([...new FormData(e.target)].map(([k, v]) => [k, Number(v)]));
-    await api("/api/config", { method: "PUT", body }); await loadConfigForm(); toast("Settings saved");
-  });
-});
-async function locateNow() { toast("Asking devices for a fresh fix…", 8000); await api("/api/icloud/poll?locate=true", { method: "POST" }); await refreshAll(); toast("Updated"); }
+$("#phIcloud").onclick = (e) => busy(e.target, async () => { await api("/api/photos/icloud", { method: "POST", body: {} }); toast("Importing from iCloud Photos."); pollPhotos(); });
+$("#phFolder").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/photos/folder", { method: "POST", body: { path: $("#phPath").value } }); if (r.error) throw new Error(r.error); toast("Importing the folder."); pollPhotos(); }); });
+function pollPhotos() { const iv = setInterval(async () => { const st = await loadStatus(); if (!st.photos.running) { clearInterval(iv); await refreshAll(); } }, 3000); }
+$("#emTest").onclick = (e) => busy(e.target, async () => toast("Sent a test email to " + (await api("/api/email/test", { method: "POST" })).to));
+$("#pwChange").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { await api("/api/auth/change", { method: "POST", body: { old: $("#pwOld").value, new: $("#pwNew").value } }); $("#pwOld").value = $("#pwNew").value = ""; toast("Changed the password."); }); });
 
 /* ---------------- refresh loop ---------------- */
 async function refreshAll() {
-  await loadDevices();
-  if (S.preset === "live" && !S.playing) {
-    const follow = S.t >= S.end - 1;
-    [S.start, S.end] = presetRange("live"); if (follow) S.t = S.end;
-  }
+  await Promise.all([loadDevices(), loadFences()]);
+  if (S.preset === "live" && S.follow && !S.playing) { [S.start, S.end] = presetRange("live"); S.t = S.end; }
+  S.lastRefresh = now();
   await loadPoints();
 }
 $("#trail").onchange = () => render();
@@ -697,14 +1039,17 @@ $("#trail").onchange = () => render();
 let started = false;
 async function start() {
   $("#app").classList.remove("hidden");
-  if (innerWidth < 820) $("#app").classList.add("noside");
+  if (isPhone()) $("#app").classList.add("noside");
   map.invalidateSize();
-  if (started) return refreshAll(); started = true;
-  await Promise.all([loadDevices(), loadFences(), loadStatus()]);
-  await setPreset(S.preset);
+  if (started) return refreshAll();
+  started = true;
+  await Promise.all([loadDevices(), loadFences(), loadStatus().catch(() => {})]);
+  S.lastRefresh = now();
+  await setPreset(S.preset === "custom" ? "live" : S.preset);
   const tab = location.hash.slice(1); if (tab && $(`[data-tab="${tab}"]`)) openTab(tab);
   setInterval(() => { if (!document.hidden) refreshAll().catch(() => {}); }, 60000);
   setInterval(() => { if (!document.hidden) loadStatus().catch(() => {}); }, 20000);
+  setInterval(() => { if (!document.hidden) updateBanner(); }, 15000);
 }
 
 (async () => {

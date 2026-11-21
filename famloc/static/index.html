@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Family Locator</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%232563eb' d='M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='none' stroke='%233F7FA3' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='5' fill='none' stroke='%239A6B43' stroke-width='2'/%3E%3Ccircle cx='12' cy='12' r='1.8' fill='%231E2B3A'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/vendor/fonts/fonts.css">
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/vendor/MarkerCluster.css">
 <link rel="stylesheet" href="/static/vendor/MarkerCluster.Default.css">
@@ -12,29 +13,27 @@
 </head>
 <body>
 
-<!-- ============ login / first-run ============ -->
 <div id="auth" class="auth hidden">
   <form id="authForm" class="auth-card">
-    <div class="brand big"><span class="pin"></span>Family Locator</div>
+    <div class="brand big"><span class="mark" aria-hidden="true"></span>Family Locator</div>
     <p id="authMsg" class="muted">Sign in</p>
     <input id="authPw" type="password" autocomplete="current-password" placeholder="Password" required>
     <input id="authPw2" type="password" autocomplete="new-password" placeholder="Repeat password" class="hidden">
     <button class="btn primary" type="submit" id="authBtn">Sign in</button>
-    <p id="authErr" class="err"></p>
+    <p id="authErr" class="err" role="alert"></p>
   </form>
 </div>
 
-<!-- ============ app ============ -->
 <div id="app" class="app hidden">
   <header class="topbar">
-    <button class="icon-btn" id="sideToggle" title="Toggle panel" aria-label="Toggle panel">
-      <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    <button class="icon-btn" id="sideToggle" title="Show or hide the panel" aria-label="Show or hide the panel" aria-controls="side">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
-    <div class="brand"><span class="pin"></span><span class="brand-text">Family Locator</span></div>
-    <div class="search">
-      <svg viewBox="0 0 24 24" class="search-ico"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
-      <input id="search" type="search" placeholder="Search people, places, addresses, or lat, lon" autocomplete="off">
-      <div id="searchResults" class="search-results hidden"></div>
+    <div class="brand"><span class="mark" aria-hidden="true"></span><span class="brand-text">Family Locator</span></div>
+    <div class="search" role="search">
+      <svg viewBox="0 0 24 24" class="search-ico" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input id="search" type="search" placeholder="Find a person, place, address or lat, lon" autocomplete="off" aria-label="Search">
+      <div id="searchResults" class="search-results hidden" role="listbox"></div>
     </div>
     <div class="chips" id="chips"></div>
     <button class="icon-btn" id="logoutBtn" title="Sign out" aria-label="Sign out">
@@ -43,59 +42,81 @@
   </header>
 
   <aside class="side" id="side">
-    <nav class="tabs" id="tabs">
-      <button data-tab="people" class="active">People</button>
-      <button data-tab="places">Places</button>
-      <button data-tab="insights">Insights</button>
-      <button data-tab="alerts">Alerts</button>
-      <button data-tab="settings">Settings</button>
+    <div class="sheet-handle" id="sheetHandle" aria-hidden="true"></div>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Panels">
+      <button role="tab" data-tab="people" aria-selected="true" aria-controls="tab-people">People</button>
+      <button role="tab" data-tab="places" aria-selected="false" aria-controls="tab-places">Places</button>
+      <button role="tab" data-tab="insights" aria-selected="false" aria-controls="tab-insights">Insights</button>
+      <button role="tab" data-tab="alerts" aria-selected="false" aria-controls="tab-alerts">Alerts</button>
+      <button role="tab" data-tab="setup" aria-selected="false" aria-controls="tab-setup">Setup</button>
     </nav>
-    <section class="tab-body" data-body="people">
-      <div class="row between"><h3>Devices</h3>
-        <label class="mini"><input type="checkbox" id="showHidden"> show hidden</label></div>
-      <div id="deviceList" class="list"></div>
+
+    <section class="tab-body" id="tab-people" role="tabpanel" data-body="people">
+      <div id="peopleList"></div>
+      <label class="toggle"><input type="checkbox" id="showHidden"> Show hidden devices</label>
     </section>
-    <section class="tab-body hidden" data-body="places">
-      <div class="row between"><h3>Places &amp; geofences</h3>
-        <button class="btn small primary" id="addPlaceBtn">+ Add place</button></div>
-      <p class="muted small">Alerts are emailed when a device enters or leaves a place. Click the map (or right-click → "Create place here") to set the centre.</p>
-      <form id="placeForm" class="card hidden">
+
+    <section class="tab-body hidden" id="tab-places" role="tabpanel" data-body="places">
+      <div class="head-row"><h2>Places</h2><button class="btn small primary" id="addPlaceBtn">Add a place</button></div>
+      <p class="muted small">You get an email when someone arrives at or leaves a place. Click the map to set its centre, or right-click anywhere and choose "Create place here".</p>
+      <form id="placeForm" class="panel hidden">
         <input type="hidden" id="pfId">
-        <label>Name <input id="pfName" required placeholder="Home, School, Work..."></label>
+        <label>Name <input id="pfName" required placeholder="Home, School, Work"></label>
         <div class="grid2">
-          <label>Lat <input id="pfLat" type="number" step="any" required></label>
-          <label>Lon <input id="pfLon" type="number" step="any" required></label>
+          <label>Latitude <input id="pfLat" type="number" step="any" required></label>
+          <label>Longitude <input id="pfLon" type="number" step="any" required></label>
         </div>
-        <label>Radius <span id="pfRadiusVal">150 m</span>
+        <label>Radius <output id="pfRadiusVal">150 m</output>
           <input id="pfRadius" type="range" min="25" max="3000" step="25" value="150"></label>
-        <div class="row gap">
-          <label class="mini"><input type="checkbox" id="pfEnter" checked> alert on arrive</label>
-          <label class="mini"><input type="checkbox" id="pfExit" checked> alert on leave</label>
-          <label class="mini">colour <input type="color" id="pfColor" value="#2563eb"></label>
-        </div>
-        <details><summary class="small">Only these devices (default: all)</summary><div id="pfDevices" class="checks"></div></details>
-        <div class="row gap end">
-          <button type="button" class="btn small danger hidden" id="pfDelete">Delete</button>
+        <fieldset class="checks-row">
+          <legend>Email me when someone</legend>
+          <label class="toggle"><input type="checkbox" id="pfEnter" checked> arrives</label>
+          <label class="toggle"><input type="checkbox" id="pfExit" checked> leaves</label>
+          <label class="toggle">Colour <input type="color" id="pfColor" value="#9a6b43"></label>
+        </fieldset>
+        <fieldset>
+          <legend>Who this applies to</legend>
+          <p class="muted small">Leave everyone unticked to alert for everyone.</p>
+          <div id="pfPeople" class="checks"></div>
+          <div id="pfItems" class="checks"></div>
+        </fieldset>
+        <div class="row end gap">
+          <button type="button" class="btn small danger hidden" id="pfDelete">Delete place</button>
           <button type="button" class="btn small" id="pfCancel">Cancel</button>
-          <button type="submit" class="btn small primary">Save</button>
+          <button type="submit" class="btn small primary">Save place</button>
         </div>
       </form>
-      <div id="placeList" class="list"></div>
+      <div id="placeList"></div>
     </section>
-    <section class="tab-body hidden" data-body="insights">
+
+    <section class="tab-body hidden" id="tab-insights" role="tabpanel" data-body="insights">
       <label>Device <select id="insDevice"></select></label>
-      <p class="muted small">For the time range selected in the timeline below.</p>
+      <p class="muted small" id="insRange"></p>
       <div id="insBody"></div>
     </section>
-    <section class="tab-body hidden" data-body="alerts">
-      <div class="row between"><h3>Events</h3>
-        <select id="evKind" class="small"><option value="">all</option><option>enter</option><option>exit</option>
-          <option>battery</option><option>stale</option><option>auth</option><option>info</option></select></div>
-      <div id="eventList" class="list"></div>
+
+    <section class="tab-body hidden" id="tab-alerts" role="tabpanel" data-body="alerts">
+      <details class="panel" id="rulesPanel">
+        <summary><h2>Alert settings</h2></summary>
+        <p class="muted small">Place alerts are set per place on the Places tab. These apply to everything.</p>
+        <form id="alertCfg" class="cfg"></form>
+        <div class="row gap">
+          <button class="btn small" id="digestPreview">Preview daily summary</button>
+          <button class="btn small" id="digestSend">Email summary now</button>
+        </div>
+        <pre id="digestBox" class="digest hidden"></pre>
+      </details>
+      <div class="head-row"><h2>Recent activity</h2>
+        <select id="evKind" class="small" aria-label="Filter events">
+          <option value="">Everything</option><option value="enter">Arrivals</option><option value="exit">Departures</option>
+          <option value="battery">Low battery</option><option value="stale">Not reporting</option>
+          <option value="auth">Sign-in</option><option value="info">Other</option></select></div>
+      <div id="eventList"></div>
     </section>
-    <section class="tab-body hidden" data-body="settings">
-      <div class="card" id="icloudCard">
-        <h3>iCloud Find My <span class="badge" id="icState">…</span></h3>
+
+    <section class="tab-body hidden" id="tab-setup" role="tabpanel" data-body="setup">
+      <div class="panel" id="icloudCard">
+        <h2>iCloud Find My <span class="badge" id="icState">…</span></h2>
         <p class="muted small" id="icDetail"></p>
         <form id="icLogin" class="stack hidden">
           <input id="icId" type="email" placeholder="Apple ID" autocomplete="username" required>
@@ -104,23 +125,23 @@
         </form>
         <form id="ic2fa" class="stack hidden">
           <input id="icCode" inputmode="numeric" placeholder="6-digit code" maxlength="8" required>
-          <div class="row gap"><button class="btn primary small">Verify</button>
-            <button type="button" class="btn small" id="icSms">Send by SMS instead</button></div>
+          <div class="row gap"><button class="btn primary small">Verify code</button>
+            <button type="button" class="btn small" id="icSms">Text me a code instead</button></div>
         </form>
         <div class="row gap" id="icActions">
-          <button class="btn small" id="icPoll">Locate all now</button>
-          <button class="btn small danger" id="icLogout">Sign out &amp; forget session</button>
+          <button class="btn small" id="icPoll">Locate everyone now</button>
+          <button class="btn small danger" id="icLogout">Sign out of iCloud</button>
         </div>
         <p class="muted small" id="icStats"></p>
       </div>
-      <div class="card">
-        <h3>Polling &amp; alerts</h3>
-        <form id="cfgForm" class="stack"></form>
+      <div class="panel">
+        <h2>Tracking</h2>
+        <form id="trackCfg" class="cfg"></form>
       </div>
-      <div class="card">
-        <h3>AirTags (FindMy.py) <span class="badge" id="atState">…</span></h3>
+      <div class="panel">
+        <h2>AirTags <span class="badge" id="atState">…</span></h2>
         <p class="muted small" id="atDetail"></p>
-        <p class="muted small">Key files: <span id="atKeys"></span><br>Put the JSON files from <code>python -m findmy decrypt --out-dir keys</code> (run on a Mac) in <code id="atDir"></code>.</p>
+        <p class="muted small">Key files: <span id="atKeys"></span>. On a Mac, run <code>python -m findmy decrypt --out-dir keys</code> and copy the files into <code id="atDir"></code>.</p>
         <form id="atLogin" class="stack hidden">
           <input id="atId" type="email" placeholder="Apple ID" autocomplete="username" required>
           <input id="atPw" type="password" placeholder="Apple ID password (not stored)" required>
@@ -128,34 +149,34 @@
         </form>
         <form id="at2fa" class="stack hidden">
           <input id="atCode" inputmode="numeric" placeholder="6-digit code" required>
-          <button class="btn primary small">Verify</button>
+          <button class="btn primary small">Verify code</button>
         </form>
         <div class="row gap" id="atActions">
-          <button class="btn small" id="atPoll">Fetch now</button>
+          <button class="btn small" id="atPoll">Fetch AirTags now</button>
           <button class="btn small danger" id="atLogout">Sign out</button>
         </div>
       </div>
-      <div class="card">
-        <h3>Photo history import</h3>
-        <p class="muted small">Backfills past locations from photo GPS. Photo points never trigger alerts.</p>
+      <div class="panel">
+        <h2>Past locations from photos</h2>
+        <p class="muted small">Adds where photos were taken to the history. Photo locations never trigger alerts.</p>
         <div class="row gap"><button class="btn small" id="phIcloud">Import from iCloud Photos</button></div>
         <form id="phFolder" class="row gap">
-          <input id="phPath" placeholder="/path/to/photo/folder on this server" required>
+          <input id="phPath" placeholder="Folder on this server, e.g. /home/user/Pictures" required>
           <button class="btn small">Import folder</button>
         </form>
         <p class="muted small" id="phStatus"></p>
       </div>
-      <div class="card">
-        <h3>Email alerts <span class="badge" id="emState">…</span></h3>
+      <div class="panel">
+        <h2>Email <span class="badge" id="emState">…</span></h2>
         <p class="muted small" id="emDetail"></p>
-        <button class="btn small" id="emTest">Send test email</button>
+        <button class="btn small" id="emTest">Send a test email</button>
       </div>
-      <div class="card">
-        <h3>Web password</h3>
+      <div class="panel">
+        <h2>Web password</h2>
         <form id="pwChange" class="stack">
           <input id="pwOld" type="password" placeholder="Current password" autocomplete="current-password" required>
-          <input id="pwNew" type="password" placeholder="New password (8+)" autocomplete="new-password" required>
-          <button class="btn small">Change</button>
+          <input id="pwNew" type="password" placeholder="New password, 8 or more characters" autocomplete="new-password" required>
+          <button class="btn small">Change password</button>
         </form>
       </div>
       <p class="muted small" id="storageLine"></p>
@@ -164,47 +185,53 @@
   </aside>
 
   <main class="mapwrap">
-    <div id="map"></div>
-    <div id="ctxMenu" class="ctx hidden"></div>
-    <div id="toast" class="toast hidden"></div>
+    <div id="map" aria-label="Map"></div>
+    <div id="viewBanner" class="view-banner" role="status"></div>
+    <div id="ctxMenu" class="menu hidden" role="menu"></div>
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </main>
 
   <footer class="timebar" id="timebar">
     <div class="tb-row">
-      <div class="seg" id="presets">
-        <button data-p="live" class="active" title="Last 24 h, follows now">Live</button>
-        <button data-p="1h">1h</button><button data-p="6h">6h</button><button data-p="24h">24h</button>
+      <div class="seg" id="presets" role="group" aria-label="Time range">
+        <button data-p="live" title="The last 24 hours, following now">Live</button>
+        <button data-p="6h">6h</button><button data-p="24h">24h</button>
         <button data-p="7d">7d</button><button data-p="30d">30d</button><button data-p="1y">1y</button>
         <button data-p="all">All</button>
       </div>
-      <button class="icon-btn sm hidden" id="moreBtn" title="Custom range">⋯</button>
-      <div class="range-inputs">
-        <input type="datetime-local" id="tFrom" aria-label="From"><span>→</span>
+      <button class="icon-btn sm" id="moreBtn" title="Custom range" aria-label="Custom range" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="1"/><path d="M4 10h16M9 3v4M15 3v4"/></svg></button>
+      <div class="range-inputs" id="rangeInputs">
+        <input type="datetime-local" id="tFrom" aria-label="From">
+        <span aria-hidden="true">to</span>
         <input type="datetime-local" id="tTo" aria-label="To">
-        <button class="btn small" id="tApply">Go</button>
-        <button class="icon-btn sm" id="tPrev" title="Shift range back">‹</button>
-        <button class="icon-btn sm" id="tNext" title="Shift range forward">›</button>
+        <button class="btn small" id="tApply">Show range</button>
       </div>
-    </div>
-    <div class="tb-row">
-      <button class="icon-btn play" id="playBtn" title="Play / pause" aria-label="Play">
-        <svg viewBox="0 0 24 24" id="playIco"><path d="M7 5l12 7-12 7z"/></svg>
+      <div class="tb-spacer"></div>
+      <button class="icon-btn sm" id="tPrev" title="Earlier" aria-label="Earlier"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button class="icon-btn sm" id="tNext" title="Later" aria-label="Later"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      <button class="icon-btn play" id="playBtn" title="Play" aria-label="Play">
+        <svg viewBox="0 0 24 24" id="playIco"><path d="M8 5l11 7-11 7z"/></svg>
       </button>
-      <select id="speed" title="Playback speed">
-        <option value="60">1 min/s</option><option value="600">10 min/s</option>
-        <option value="3600" selected>1 h/s</option><option value="21600">6 h/s</option>
-        <option value="86400">1 day/s</option><option value="604800">1 wk/s</option>
+      <select id="speed" title="Playback speed" aria-label="Playback speed">
+        <option value="60">1 min a second</option><option value="600">10 min a second</option>
+        <option value="3600" selected>1 hour a second</option><option value="21600">6 hours a second</option>
+        <option value="86400">1 day a second</option><option value="604800">1 week a second</option>
       </select>
-      <div class="scrub">
-        <canvas id="histo"></canvas>
-        <input type="range" id="scrub" min="0" max="1000" value="1000">
-      </div>
-      <div class="tlabel"><b id="tNow">—</b><small id="tSpan"></small></div>
-      <select id="trail" title="Track trail behind the cursor">
-        <option value="0">full trail</option><option value="3600">1 h trail</option>
-        <option value="21600">6 h trail</option><option value="86400">24 h trail</option>
+      <select id="trail" title="How much track to show behind the time" aria-label="Trail length">
+        <option value="0">Whole track</option><option value="3600">Last hour</option>
+        <option value="21600">Last 6 hours</option><option value="86400">Last day</option>
       </select>
     </div>
+    <div class="lanes" id="lanes">
+      <div class="lane-names" id="laneNames"></div>
+      <div class="lane-track" id="laneTrack">
+        <canvas id="laneCanvas"></canvas>
+        <input type="range" id="scrub" min="0" max="1000" value="1000" aria-label="Time position">
+        <div id="laneTip" class="lane-tip hidden"></div>
+      </div>
+    </div>
+    <div class="lane-legend" id="laneLegend"></div>
   </footer>
 </div>
 

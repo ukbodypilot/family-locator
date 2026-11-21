@@ -13,6 +13,13 @@ Sharing group, plus AirTags and photo-GPS backfill.
 - **History is durable**: SQLite on disk, `synchronous=FULL`, daily online backup to `data/backups/` (14 kept).
 - **Alerts by email**: arrive/leave a place (with hysteresis), low battery, phone/iPad/Watch stale, iCloud
   re-login needed.
+- **Organised around people**: one marker per person, using their freshest phone, watch or iPad fix,
+  merged when people are at the same place; status lines like "At *School* since 08:12"; devices
+  folded underneath with a "⋯" menu (locate now, last known location, battery history, rename, hide).
+- **Timeline lanes**: one row per person, coloured by place, moving or elsewhere, with night shading
+  and hover details. A "Viewing … / Back to now" banner makes history mode obvious.
+- **Alert rules**: per place and per person, one alert when phone and watch cross together, quiet
+  hours, and a daily summary email (preview and send-now on the Alerts tab).
 - **Map UI**: 10 base maps (OSM, Esri streets/grey/dark/satellite/hybrid/topo, OpenTopoMap, CyclOSM,
   Humanitarian); overlays for tracks, accuracy, dots, heatmap, stays, places and photos; search for
   people, places, addresses and `lat, lon`; a timeline with presets, custom range, a per-device
