@@ -37,7 +37,7 @@ def lan_url(cfg: Config) -> str:
     """Direct link on the home network."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("192.168.2.1", 80))
+        s.connect(("10.255.255.255", 1))  # UDP "connect" sends nothing; just picks the LAN interface
         ip = s.getsockname()[0]
         s.close()
     except OSError:
