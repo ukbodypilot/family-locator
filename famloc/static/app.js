@@ -166,6 +166,7 @@ const BASES = {
   "Terrain (OpenTopoMap)": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 17, attribution: osmAttr + ', SRTM | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)' }),
   "Cycling (CyclOSM)": L.tileLayer("https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 20, attribution: osmAttr + ' | <a href="https://www.cyclosm.org">CyclOSM</a>' }),
   "Humanitarian": L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, attribution: osmAttr + " | Humanitarian OSM Team" }),
+  "Public transport (ÖPNVKarte)": L.tileLayer("https://tileserver.memomaps.de/tilegen/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 18, attribution: 'Map <a href="https://memomaps.de/">memomaps.de</a> CC-BY-SA, ' + osmAttr }),
 };
 const darkPref = matchMedia("(prefers-color-scheme: dark)").matches;
 let baseName = store.get("base", darkPref ? "Dark streets (OSM)" : "Streets (OSM)");
@@ -182,14 +183,27 @@ const L_stays = L.layerGroup().addTo(map);
 const L_places = L.layerGroup().addTo(map);
 const L_photos = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 45 });
 const L_temp = L.layerGroup().addTo(map);
+const L_rail = L.tileLayer("https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, subdomains: "abc",
+  attribution: 'Railways &copy; <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> (CC-BY-SA)' });
 const OVER = {
   "People and items": L_people, "Tracks": L_tracks, "Accuracy circles": L_acc, "Every device separately": L_devices,
-  "Every fix as a dot": L_points, "Heatmap": L_heat, "Stays (from Insights)": L_stays, "Places": L_places, "Photo locations": L_photos,
+  "Every fix as a dot": L_points, "Heatmap": L_heat, "Stays (from Insights)": L_stays, "Places": L_places, "Photo locations": L_photos, "Railways (OpenRailwayMap)": L_rail,
 };
 const overOn = store.get("overlays2", null);
 if (overOn) for (const [n, l] of Object.entries(OVER)) { if (overOn.includes(n)) l.addTo(map); else map.removeLayer(l); }
 else L_photos.addTo(map);
-L.control.layers(BASES, OVER, { position: "topright", collapsed: true }).addTo(map);
+const layerCtl = L.control.layers(BASES, OVER, { position: "topright", collapsed: true }).addTo(map);
+/* Thunderforest Transport needs a (free) API key; offered only when one is set in data/config.toml. */
+let tfAdded = false;
+function addKeyedLayers(keys) {
+  if (tfAdded || !keys || !keys.thunderforest) return;
+  tfAdded = true;
+  const name = "Transport (Thunderforest)";
+  const lyr = L.tileLayer(`https://{s}.tile.thunderforest.com/transport/{z}/{x}/{y}{r}.png?apikey=${encodeURIComponent(keys.thunderforest)}`,
+    { maxZoom: MAXZ, maxNativeZoom: 22, subdomains: "abc", attribution: 'Maps &copy; <a href="https://www.thunderforest.com/">Thunderforest</a>, ' + osmAttr });
+  BASES[name] = lyr; layerCtl.addBaseLayer(lyr, name);
+  if (store.get("base", "") === name) { Object.values(BASES).forEach((b) => map.hasLayer(b) && map.removeLayer(b)); lyr.addTo(map); }
+}
 map.on("baselayerchange", (e) => store.set("base", e.name));
 map.on("overlayadd overlayremove", () => { store.set("overlays2", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n)); render(); });
 map.on("moveend", () => { const c = map.getCenter(); store.set("view", [c.lat, c.lng]); store.set("zoom", map.getZoom()); });
@@ -1039,6 +1053,7 @@ async function loadStatus() {
   const bk = st.backup;
   $("#storageLine").textContent = `${st.storage.points.toLocaleString()} fixes saved on disk in ${st.storage.db}. ` + (bk ? `Last daily backup ${ago(bk.ts)} (${(bk.bytes / 1024).toFixed(0)} KB); 14 are kept.` : "The first backup hasn't run yet.");
   $("#cfgLine").textContent = `Version ${st.version}.`;
+  addKeyedLayers(st.tile_keys);
   const L1 = st.links || {};
   $("#pubLink").innerHTML = L1.public ? `<a href="${esc(L1.public)}" target="_blank" rel="noopener">${esc(L1.public)}</a> <button class="name-it" id="copyPub">Copy</button>` : "The gateway's tunnel isn't running, so there's no outside link right now.";
   $("#lanLink").innerHTML = L1.lan ? `At home: <a href="${esc(L1.lan)}">${esc(L1.lan)}</a>` : "";

@@ -42,7 +42,7 @@ history.
 | Apple (iCloud) | Your Apple ID session | Every poll, every 5 minutes by default |
 | Gmail | Alert and summary emails | When alerts fire, and once a day |
 | OpenStreetMap Nominatim | The text you type into search, or the point you click for "What's here?" | Only when you do it. Device positions are never sent. |
-| Map tile servers (OSM, Esri, OpenTopoMap, CyclOSM) | Which map squares your browser shows | When you view the map. These requests come from your browser, not the server. |
+| Map tile servers (OSM, Esri, OpenTopoMap, CyclOSM, memomaps, OpenRailwayMap, Thunderforest if set) | Which map squares your browser shows | When you view the map. These requests come from your browser, not the server. |
 | Cloudflare | Page traffic, when used through the tunnel | When you use the outside link |
 
 Nothing else is sent: no analytics, no telemetry, no third-party scripts. Fonts and map code are

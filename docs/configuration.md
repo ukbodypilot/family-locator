@@ -54,11 +54,12 @@ inside any `[section]`; sections are only for readability.
 | `stay_radius_m` | 150 | yes | A stay is time spent within this distance of one spot... |
 | `stay_min_minutes` | 10 | yes | ...for at least this long. |
 
-## Search
+## Search and maps
 
 | Key | Default | Meaning |
 |---|---|---|
 | `nominatim_url` | `https://nominatim.openstreetmap.org` | Geocoder for address search and "What's here?". Point it at your own Nominatim to keep searches local. |
+| `thunderforest_key` | blank | Optional [Thunderforest](https://www.thunderforest.com/) API key (the free tier is enough). Adds the "Transport (Thunderforest)" base map. The key is sent to the browser to fetch tiles. |
 
 ## Environment
 

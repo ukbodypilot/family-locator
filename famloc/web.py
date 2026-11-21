@@ -232,6 +232,7 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         return {"version": __version__, "icloud": icloud.status(), "airtag": airtag.status(),
                 "photos": photos.status(), "backup": db.get_setting("last_backup"),
                 "links": {"public": public_url(cfg), "lan": lan_url(cfg)},
+                "tile_keys": {"thunderforest": cfg.thunderforest_key or None},
                 "storage": {"db": str(db.DB_PATH), "points": db.q1("SELECT COUNT(*) AS n FROM points")["n"]}, "email": {"configured": alerter.email_configured(),
                                                      "recipient": cfg.email_recipient, **ALERT_COUNTERS},
                 "config": {k: getattr(cfg, k) for k in ("poll_seconds", "locate_minutes", "airtag_poll_minutes",

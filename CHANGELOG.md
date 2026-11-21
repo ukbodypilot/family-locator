@@ -2,6 +2,16 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.1.0] -- 2026-11-21
+
+- **Public transport base map** (ÖPNVKarte, from memomaps.de): bus, tram, metro and rail routes
+  with line numbers and stops. No key needed.
+- **Railways overlay** (OpenRailwayMap): rail, metro and tram lines on top of any base map,
+  including satellite.
+- **Optional Thunderforest Transport** base map, shown when `thunderforest_key` is set in
+  `data/config.toml`.
+- No longer hard-codes the home router's address when working out the home-network link.
+
 ## [1.0.0] -- 2026-11-21
 
 First full release. Everything below, plus complete documentation in `docs/`.

@@ -52,6 +52,7 @@ class Config:
 
     # Geocoding (search box). Only typed queries / explicit "what's here" are sent.
     nominatim_url: str = "https://nominatim.openstreetmap.org"
+    thunderforest_key: str = ""  # optional; enables the "Transport (Thunderforest)" base map
 
     extra: dict = field(default_factory=dict)
 

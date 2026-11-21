@@ -23,7 +23,7 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
 - **Daily summary email.** Every evening: who went where, how far, and a link per person.
 - **Works on a phone, from anywhere,** through the radio gateway's Cloudflare tunnel. Email links
   always carry the current address.
-- **Rich map.** 11 base maps including satellite, hybrid, terrain and two dark styles, zoom to
+- **Rich map.** 12 base maps including satellite, hybrid, terrain, public transport and two dark styles, a railway overlay, zoom to
   street-entrance level, search for people, places, addresses and coordinates, and a heatmap.
 - **Insights.** Distance per day, trips, stays, the places someone visits most, and battery over time.
 - **Extras.** AirTag history through FindMy.py (needs keys from a Mac). Past locations backfilled

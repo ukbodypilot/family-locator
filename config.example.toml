@@ -16,6 +16,9 @@ digest_hour = 20          # (UI) daily summary email at this local hour; -1 = of
 quiet_from_hour = -1      # (UI) no alert emails from this hour...
 quiet_to_hour = -1        # (UI) ...until this hour; -1 = off
 
+[maps]
+thunderforest_key = ""  # optional, free at thunderforest.com: adds the Thunderforest Transport base map
+
 [links]
 # Outside links in emails. Blank = use the radio gateway's Cloudflare quick tunnel,
 # whose address is read from cloudflared each time.

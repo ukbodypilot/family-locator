@@ -63,6 +63,8 @@ The layers button (top right) picks the base map and what's drawn on it.
 | Satellite, Hybrid (satellite + labels) | Sharp to zoom 19. |
 | Topographic (Esri), Terrain (OpenTopoMap) | Contours and relief. |
 | Cycling (CyclOSM), Humanitarian | Alternative OpenStreetMap styles. |
+| Public transport (ÖPNVKarte) | Bus, tram, metro and rail routes with line numbers and stops. Real detail to zoom 18. |
+| Transport (Thunderforest) | Only shown when `thunderforest_key` is set (free key from thunderforest.com). |
 
 Every map zooms to level 22. Past a map's real detail, its last tiles are enlarged.
 
@@ -77,6 +79,7 @@ Every map zooms to level 22. Past a map's real detail, its last tiles are enlarg
 | Stays (from Insights) | The stays of the device open in Insights. |
 | Places | Your saved places and their names. |
 | Photo locations | Where photos were taken, clustered. |
+| Railways (OpenRailwayMap) | Rail, metro and tram lines on top of any base map, including satellite. |
 
 Your choices are remembered in this browser.
 
