@@ -70,3 +70,34 @@ def load() -> Config:
     if not cfg.email_recipient:
         cfg.email_recipient = cfg.email_address
     return cfg
+
+
+# Settings editable from the web UI: name -> (label, min, max, unit). Stored as overrides in the
+# DB (settings key "cfg_overrides") and applied on top of config.toml at startup and on save.
+EDITABLE = {
+    "poll_seconds": ("Read cached positions every", 60, 3600, "s"),
+    "locate_minutes": ("Ask devices for a fresh fix every (0 = never)", 0, 1440, "min"),
+    "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
+    "low_battery_pct": ("Low battery alert below (0 = off)", 0, 100, "%"),
+    "stale_hours": ("Stale device alert after (0 = off)", 0, 720, "h"),
+    "geofence_exit_margin_m": ("Leave-alert margin beyond radius", 0, 1000, "m"),
+    "max_alert_accuracy_m": ("Ignore fixes worse than", 20, 5000, "m"),
+    "stay_radius_m": ("Stay radius", 25, 2000, "m"),
+    "stay_min_minutes": ("Stay minimum duration", 1, 600, "min"),
+}
+
+
+def apply_overrides(cfg: Config, overrides: dict) -> dict:
+    """Validate + apply; returns the cleaned overrides."""
+    clean = {}
+    for k, v in (overrides or {}).items():
+        if k not in EDITABLE:
+            continue
+        _, lo, hi, _ = EDITABLE[k]
+        typ = type(getattr(cfg, k))
+        v = typ(max(lo, min(hi, float(v))))
+        if k == "locate_minutes" and 0 < v < 5:
+            v = 5  # don't hammer family devices' batteries
+        setattr(cfg, k, v)
+        clean[k] = v
+    return clean

@@ -173,8 +173,11 @@ class ICloudSource:
                 mgr.refresh(locate=locate)
                 if locate:
                     self.last_locate = time.time()
-                    # Devices answer a locate over a few seconds; read again shortly after.
+                    # Devices answer a locate over ~5-30 s; ingest twice so slow ones land too.
                     time.sleep(8)
+                    mgr.refresh(locate=False)
+                    self._ingest(mgr)
+                    time.sleep(12)
                     mgr.refresh(locate=False)
                 self._ingest(mgr)
                 self.last_ok = time.time()
@@ -188,6 +191,45 @@ class ICloudSource:
                 self.state_detail = f"poll error: {type(e).__name__}: {e}"
                 log.warning("poll error: %s", traceback.format_exc())
 
+    @staticmethod
+    def _dev_id(d: dict) -> str:
+        return f"icloud:{d.get('deviceDiscoveryId') or d.get('baUUID') or d['id']}"
+
+    def locate_device(self, dev_id: str) -> dict:
+        """Ask ONE device for a fresh fix (Find My's selectedDevice), wait for it, ingest."""
+        from pyicloud.services.findmyiphone import _FMIP_CLIENT_CONTEXT_TIMEZONE
+        with self.lock:
+            if self.api is None:
+                raise KeyError("not logged in")
+            mgr = self.api.devices
+            target = next((dv for dv in mgr if self._dev_id(dict(dv.data)) == dev_id), None)
+            if target is None:
+                raise KeyError(f"{dev_id} not in the current Find My device list")
+            before = (target.data.get("location") or {}).get("timeStamp")
+            req = {"clientContext": {"appName": "iCloud Find (Web)", "appVersion": "2.0", "apiVersion": "3.0",
+                                     "deviceListVersion": 1, "fmly": self.cfg.with_family,
+                                     "timezone": _FMIP_CLIENT_CONTEXT_TIMEZONE, "inactiveTime": 0,
+                                     "shouldLocate": True, "selectedDevice": target.data["id"]},
+                   "serverContext": mgr._server_ctx}
+            with mgr._refresh_lock:
+                resp = mgr.session.post(mgr._fmip_refresh_url, params=mgr.params, json=req).json()
+                if resp.get("serverContext"):
+                    mgr._server_ctx = resp["serverContext"]
+                    mgr._server_ctx["theftLoss"] = None
+            self.counters["single_locates"] = self.counters.get("single_locates", 0) + 1
+            after, waited = before, 0
+            while waited < 36:
+                time.sleep(6)
+                waited += 6
+                mgr.refresh(locate=False)
+                after = (target.data.get("location") or {}).get("timeStamp")
+                if after and after != before:
+                    break
+            self._ingest(mgr)
+            self.last_ok = time.time()
+            return {"device": dev_id, "updated": bool(after and after != before),
+                    "fix_ts": after / 1000 if after else None, "waited_s": waited}
+
     def _ingest(self, mgr) -> None:
         info = dict(mgr.user_info or {})
         members = info.get("membersInfo") or {}
@@ -197,8 +239,7 @@ class ICloudSource:
         for dev in mgr:
             d = dict(dev.data)
             raw_dump.append(d)
-            stable = d.get("deviceDiscoveryId") or d.get("baUUID") or d["id"]
-            dev_id = f"icloud:{stable}"
+            dev_id = self._dev_id(d)
             prs = d.get("prsId")
             m = members.get(prs) if prs else None
             owner = (" ".join(x for x in (m.get("firstName"), m.get("lastName")) if x) if m else me)
@@ -208,7 +249,9 @@ class ICloudSource:
                              owner=owner, model=d.get("deviceDisplayName") or d.get("modelDisplayName"),
                              device_class=d.get("deviceClass"), battery=battery,
                              battery_status=d.get("batteryStatus"),
-                             meta={"model": d.get("rawDeviceModel"), "status": d.get("deviceStatus")})
+                             meta={"model": d.get("rawDeviceModel"), "status": d.get("deviceStatus"),
+                                   "locationCapable": d.get("locationCapable"),
+                                   "lowPowerMode": d.get("lowPowerMode")})
             row = db.q1("SELECT * FROM devices WHERE id=?", (dev_id,))
             n += 1
             self.alerter.check_battery(row, battery)

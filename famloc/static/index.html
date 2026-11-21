@@ -108,10 +108,14 @@
             <button type="button" class="btn small" id="icSms">Send by SMS instead</button></div>
         </form>
         <div class="row gap" id="icActions">
-          <button class="btn small" id="icPoll">Locate now</button>
+          <button class="btn small" id="icPoll">Locate all now</button>
           <button class="btn small danger" id="icLogout">Sign out &amp; forget session</button>
         </div>
         <p class="muted small" id="icStats"></p>
+      </div>
+      <div class="card">
+        <h3>Polling &amp; alerts</h3>
+        <form id="cfgForm" class="stack"></form>
       </div>
       <div class="card">
         <h3>AirTags (FindMy.py) <span class="badge" id="atState">…</span></h3>
@@ -154,6 +158,7 @@
           <button class="btn small">Change</button>
         </form>
       </div>
+      <p class="muted small" id="storageLine"></p>
       <p class="muted small" id="cfgLine"></p>
     </section>
   </aside>

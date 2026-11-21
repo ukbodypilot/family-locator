@@ -324,14 +324,14 @@ function pointPopup(d, p, current = false) {
   el.innerHTML = `<h4>${esc(d.name)}${d.owner ? ` <span class="muted">· ${esc(d.owner)}</span>` : ""}</h4>
     <table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("")}</table>
     <div class="acts"><a data-a="here">What's here?</a><a data-a="place">Make a place</a><a data-a="ins">Insights</a>
-    ${current && d.source === "icloud" ? '<a data-a="locate">Locate now</a>' : ""}
+    ${current && d.source === "icloud" ? '<a data-a="locate">Locate this device</a>' : ""}
     <a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}" target="_blank" rel="noopener">Directions</a></div>`;
   el.addEventListener("click", async (e) => {
     const a = e.target.dataset.a; if (!a) return;
     if (a === "here") whatsHere(lat, lon);
     if (a === "place") newPlace(lat, lon);
     if (a === "ins") { $("#insDevice").value = d.id; openTab("insights"); }
-    if (a === "locate") locateNow();
+    if (a === "locate") locateOne(d);
   });
   return el;
 }
@@ -347,37 +347,64 @@ function buildPhotos() {
 }
 
 /* ---------------- device list ---------------- */
+function deviceRow(d) {
+  const p = lastAt(d.id, S.t) || (d.last ? [d.last.ts, d.last.lat, d.last.lon, d.last.acc] : null);
+  const b = d.battery != null ? Math.round(d.battery * 100) : null;
+  const canLocate = d.source === "icloud" && (d.meta || {}).locationCapable !== false;
+  const row = document.createElement("div");
+  row.className = "dev" + (d.hidden ? " off" : "");
+  row.innerHTML = `<span class="dot" style="background:${d.color}"></span>
+    <span class="nm" title="${esc(d.model || "")}">${esc(classIcon(d))} ${esc(d.name)}</span>
+    <span class="tools">${canLocate ? '<button data-a="locate" title="Locate this device now">⟳</button>' : ""}
+      <button data-a="color" title="Colour">●</button><button data-a="rename" title="Rename">✎</button>
+      <button data-a="hide" title="${d.hidden ? "Show" : "Hide"}">${d.hidden ? "◌" : "◉"}</button></span>
+    <span class="sub"><span>${p ? ago(p[0]) : "no location"}</span>
+      ${p && p[3] ? `<span>±${Math.round(p[3])} m</span>` : ""}
+      ${b != null ? `<span class="batt ${b <= 20 ? "low" : ""}">${b}%${d.battery_status === "Charging" ? "⚡" : ""}</span>` : ""}
+      ${d.n_points ? `<span>${d.n_points} fixes</span>` : ""}${d.model ? `<span>${esc(d.model)}</span>` : ""}</span>`;
+  row.onclick = async (e) => {
+    const a = e.target.dataset.a;
+    if (a === "locate") return locateOne(d, e.target);
+    if (a === "hide") { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { hidden: d.hidden ? 0 : 1 } }); await loadDevices(); render(); drawHisto(); return; }
+    if (a === "rename") { const n = prompt("Display name", d.name); if (n) { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n } }); await loadDevices(); render(); } return; }
+    if (a === "color") { const inp = document.createElement("input"); inp.type = "color"; inp.value = d.color; inp.onchange = async () => { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { color: inp.value } }); await loadDevices(); render(); drawHisto(); }; inp.click(); return; }
+    if (p) { map.setView([p[1], p[2]], Math.max(map.getZoom(), 15)); }
+    else toast(`${d.name}: Apple has no location for this device (offline or location off)`);
+    if (innerWidth < 820) $("#app").classList.add("noside");
+  };
+  return row;
+}
 function renderDeviceList() {
   const el = $("#deviceList"); el.innerHTML = "";
   const groups = {};
   for (const d of S.devices) { if (d.hidden && !S.showHidden) continue; (groups[d.owner || (isPhotos(d) ? "History" : "Items")] ||= []).push(d); }
   if (!S.devices.length) el.innerHTML = '<p class="muted">No devices yet. Sign in to iCloud on the <a href="#settings" onclick="openTab(\'settings\')">Settings</a> tab.</p>';
+  const openNoFix = store.get("openNoFix", []);
   for (const [owner, devs] of Object.entries(groups)) {
     el.insertAdjacentHTML("beforeend", `<div class="owner-h">${esc(owner)}</div>`);
-    for (const d of devs) {
-      const p = lastAt(d.id, S.t) || (d.last ? [d.last.ts, d.last.lat, d.last.lon, d.last.acc] : null);
-      const b = d.battery != null ? Math.round(d.battery * 100) : null;
-      const row = document.createElement("div");
-      row.className = "dev" + (d.hidden ? " off" : "");
-      row.innerHTML = `<span class="dot" style="background:${d.color}"></span>
-        <span class="nm" title="${esc(d.model || "")}">${esc(classIcon(d))} ${esc(d.name)}</span>
-        <span class="tools"><button data-a="color" title="Colour">●</button><button data-a="rename" title="Rename">✎</button>
-          <button data-a="hide" title="${d.hidden ? "Show" : "Hide"}">${d.hidden ? "◌" : "◉"}</button></span>
-        <span class="sub"><span>${p ? ago(p[0]) : "no fix"}</span>
-          ${p && p[3] ? `<span>±${Math.round(p[3])} m</span>` : ""}
-          ${b != null ? `<span class="batt ${b <= 20 ? "low" : ""}">${b}%${d.battery_status === "Charging" ? "⚡" : ""}</span>` : ""}
-          <span>${d.n_points} fixes</span></span>`;
-      row.onclick = async (e) => {
-        const a = e.target.dataset.a;
-        if (a === "hide") { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { hidden: d.hidden ? 0 : 1 } }); await loadDevices(); render(); drawHisto(); return; }
-        if (a === "rename") { const n = prompt("Display name", d.name); if (n) { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n } }); await loadDevices(); render(); } return; }
-        if (a === "color") { const inp = document.createElement("input"); inp.type = "color"; inp.value = d.color; inp.onchange = async () => { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { color: inp.value } }); await loadDevices(); render(); drawHisto(); }; inp.click(); return; }
-        if (p) { map.setView([p[1], p[2]], Math.max(map.getZoom(), 15)); }
-        if (innerWidth < 820) $("#app").classList.add("noside");
-      };
-      el.appendChild(row);
+    const withFix = devs.filter((d) => d.last).sort((a, b) => b.last.ts - a.last.ts);
+    const noFix = devs.filter((d) => !d.last);
+    for (const d of withFix) el.appendChild(deviceRow(d));
+    if (noFix.length) {
+      const det = document.createElement("details"); det.className = "nofix"; det.open = openNoFix.includes(owner);
+      det.innerHTML = `<summary>${noFix.length} without a location (offline / location off)</summary>`;
+      det.ontoggle = () => { const s = new Set(store.get("openNoFix", [])); det.open ? s.add(owner) : s.delete(owner); store.set("openNoFix", [...s]); };
+      for (const d of noFix) det.appendChild(deviceRow(d));
+      el.appendChild(det);
     }
   }
+}
+async function locateOne(d, btn) {
+  if (btn) btn.classList.add("spin");
+  toast(`Locating ${d.name}… (up to ~40 s)`, 40000);
+  try {
+    const r = await api(`/api/icloud/locate/${encodeURIComponent(d.id)}`, { method: "POST" });
+    await refreshAll();
+    toast(r.updated ? `${d.name}: new fix from ${ago(r.fix_ts)}` : `${d.name} didn't answer with a new fix (asleep, offline or no signal)`, 6000);
+    const n = S.byId[d.id];
+    if (r.updated && n && n.last) map.setView([n.last.lat, n.last.lon], Math.max(map.getZoom(), 15));
+  } catch (e) { toast(e.message, 6000); }
+  finally { if (btn) btn.classList.remove("spin"); }
 }
 $("#showHidden").onchange = (e) => { S.showHidden = e.target.checked; renderDeviceList(); render(); drawHisto(); };
 function fillDeviceSelects() {
@@ -392,7 +419,7 @@ function openTab(name) {
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.dataset.body !== name));
   $("#app").classList.remove("noside");
   if (name === "alerts") loadEvents();
-  if (name === "settings") loadStatus();
+  if (name === "settings") { loadStatus(); loadConfigForm(); }
   if (name === "insights") loadInsights();
   if (name !== "insights") L_stays.clearLayers();
   history.replaceState(null, "", "#" + name);
@@ -617,6 +644,9 @@ async function loadStatus() {
   $("#phStatus").textContent = ph.kind ? `${ph.running ? "Running" : "Last run"} (${ph.kind}): ${ph.scanned} scanned, ${ph.with_gps} with GPS, ${ph.new} new${ph.error ? " · error: " + ph.error : ""}` : "";
   $("#emState").textContent = st.email.configured ? "configured" : "not configured"; $("#emState").className = "badge " + (st.email.configured ? "ok" : "bad");
   $("#emDetail").textContent = st.email.configured ? `to ${st.email.recipient} · ${st.email.emails_sent} sent, ${st.email.emails_failed} failed` : "Set email_address / email_app_password in data/config.toml";
+  const bk = st.backup;
+  $("#storageLine").textContent = `${st.storage.points.toLocaleString()} fixes stored in ${st.storage.db} (on disk, survives reboot)` +
+    (bk ? ` · last daily backup ${ago(bk.ts)}, ${(bk.bytes / 1024).toFixed(0)} KB, 14 kept in data/backups/` : " · first backup pending");
   const c = st.config;
   $("#cfgLine").textContent = `v${st.version} · poll ${c.poll_seconds}s · fresh locate every ${c.locate_minutes} min · AirTags every ${c.airtag_poll_minutes} min · low battery ${c.low_battery_pct}% · stale ${c.stale_hours} h · stays ≥${c.stay_min_minutes} min within ${c.stay_radius_m} m`;
   return st;
@@ -636,6 +666,19 @@ $("#phFolder").addEventListener("submit", (e) => { e.preventDefault(); busy(e.su
 function pollPhotos() { const iv = setInterval(async () => { const st = await loadStatus(); if (!st.photos.running) { clearInterval(iv); await loadDevices(); loadPoints(); } }, 3000); }
 $("#emTest").onclick = (e) => busy(e.target, async () => toast("Sent to " + (await api("/api/email/test", { method: "POST" })).to));
 $("#pwChange").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { await api("/api/auth/change", { method: "POST", body: { old: $("#pwOld").value, new: $("#pwNew").value } }); $("#pwOld").value = $("#pwNew").value = ""; toast("Password changed"); }); });
+async function loadConfigForm() {
+  const rows = await api("/api/config");
+  $("#cfgForm").innerHTML = rows.map((r) => `<label class="cfg-row"><span>${esc(r.label)} <span class="u">(${esc(r.unit)})</span></span>
+    <input type="number" name="${r.key}" min="${r.min}" max="${r.max}" step="any" value="${r.value}"></label>`).join("") +
+    '<div class="row gap end"><span class="muted small" style="margin-right:auto">Fresh fixes wake family devices (battery). Applied immediately.</span><button class="btn small primary">Save</button></div>';
+}
+$("#cfgForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  busy(e.submitter, async () => {
+    const body = Object.fromEntries([...new FormData(e.target)].map(([k, v]) => [k, Number(v)]));
+    await api("/api/config", { method: "PUT", body }); await loadConfigForm(); toast("Settings saved");
+  });
+});
 async function locateNow() { toast("Asking devices for a fresh fix…", 8000); await api("/api/icloud/poll?locate=true", { method: "POST" }); await refreshAll(); toast("Updated"); }
 
 /* ---------------- refresh loop ---------------- */

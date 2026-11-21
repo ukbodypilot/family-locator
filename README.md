@@ -9,7 +9,9 @@ Sharing group, plus AirTags and photo-GPS backfill.
 - **AirTags** (via [FindMy.py](https://github.com/malmeloo/FindMy.py)): needs key files decrypted
   on a Mac. Returns several days of history per poll.
 - **Photo history**: GPS from iCloud Photos metadata (no image download) or from a local folder's EXIF.
-- **Alerts by email**: arrive/leave a place (with hysteresis), low battery, device stale, iCloud
+- **Polling + alert settings editable in the UI** (Settings → Polling & alerts); per-device "⟳ locate now".
+- **History is durable**: SQLite on disk, `synchronous=FULL`, daily online backup to `data/backups/` (14 kept).
+- **Alerts by email**: arrive/leave a place (with hysteresis), low battery, phone/iPad/Watch stale, iCloud
   re-login needed.
 - **Map UI**: 10 base maps (OSM, Esri streets/grey/dark/satellite/hybrid/topo, OpenTopoMap, CyclOSM,
   Humanitarian); overlays for tracks, accuracy, dots, heatmap, stays, places and photos; search for

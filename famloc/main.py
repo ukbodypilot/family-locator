@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 
@@ -17,18 +18,27 @@ from .web import create_app
 
 
 def _housekeeping(alerter: Alerter, stop: threading.Event) -> None:
-    while not stop.wait(600):
+    log = logging.getLogger("famloc")
+    while True:
         try:
             alerter.check_stale()
+            last = (db.get_setting("last_backup") or {}).get("ts", 0)
+            if time.time() - last > 23 * 3600:
+                log.info("backup written: %s", db.backup())
         except Exception:  # noqa: BLE001
-            logging.getLogger("famloc").exception("housekeeping")
+            log.exception("housekeeping")
+            db.add_event("error", "housekeeping/backup failed - see journal")
+        if stop.wait(600):
+            return
 
 
 def main() -> None:
+    os.umask(0o077)  # DB, WAL, backups, sessions: owner-only
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("pyicloud").setLevel(logging.WARNING)
     cfg = config.load()
     db.init()
+    config.apply_overrides(cfg, db.get_setting("cfg_overrides", {}))
     alerter = Alerter(cfg)
     icloud = ICloudSource(cfg, alerter)
     airtag = AirTagSource(cfg, alerter)

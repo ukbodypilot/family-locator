@@ -97,7 +97,7 @@ def conn() -> sqlite3.Connection:
         c = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA journal_mode=WAL")
-        c.execute("PRAGMA synchronous=NORMAL")
+        c.execute("PRAGMA synchronous=FULL")  # every fix on disk before commit returns
         c.execute("PRAGMA foreign_keys=ON")
         _local.conn = c
     return c
@@ -178,3 +178,25 @@ def add_event(kind: str, message: str, *, device_id: str | None = None,
     cur = x("INSERT INTO events(ts,kind,device_id,geofence_id,message) VALUES(?,?,?,?,?)",
             (ts or time.time(), kind, device_id, geofence_id, message))
     return cur.lastrowid
+
+
+BACKUP_DIR = DATA_DIR / "backups"
+
+
+def backup(keep: int = 14) -> str:
+    """Consistent online copy (sqlite backup API) to data/backups/famloc-YYYY-MM-DD.db; prune old."""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    BACKUP_DIR.chmod(0o700)
+    dst = BACKUP_DIR / f"famloc-{time.strftime('%Y-%m-%d')}.db"
+    tmp = dst.with_suffix(".tmp")
+    out = sqlite3.connect(tmp)
+    try:
+        conn().backup(out)
+    finally:
+        out.close()
+    tmp.chmod(0o600)
+    tmp.replace(dst)
+    for old in sorted(BACKUP_DIR.glob("famloc-*.db"))[:-keep]:
+        old.unlink()
+    set_setting("last_backup", {"ts": time.time(), "path": str(dst), "bytes": dst.stat().st_size})
+    return str(dst)

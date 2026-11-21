@@ -15,7 +15,7 @@ from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, analysis, db, geocode
+from . import __version__, analysis, config, db, geocode
 from .alerts import COUNTERS as ALERT_COUNTERS
 
 log = logging.getLogger("famloc.web")
@@ -213,7 +213,8 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
     @app.get("/api/status")
     def status():
         return {"version": __version__, "icloud": icloud.status(), "airtag": airtag.status(),
-                "photos": photos.status(), "email": {"configured": alerter.email_configured(),
+                "photos": photos.status(), "backup": db.get_setting("last_backup"),
+                "storage": {"db": str(db.DB_PATH), "points": db.q1("SELECT COUNT(*) AS n FROM points")["n"]}, "email": {"configured": alerter.email_configured(),
                                                      "recipient": cfg.email_recipient, **ALERT_COUNTERS},
                 "config": {k: getattr(cfg, k) for k in ("poll_seconds", "locate_minutes", "airtag_poll_minutes",
                                                         "low_battery_pct", "stale_hours", "stay_radius_m",
@@ -232,6 +233,22 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         n = db.q1("SELECT COUNT(*) AS n FROM points")["n"]
         lines.append(f"famloc_points {n}")
         return PlainTextResponse("\n".join(lines) + "\n")
+
+    # ------------------------------------------------------------- settings
+    @app.get("/api/config")
+    def get_config():
+        ov = db.get_setting("cfg_overrides", {})
+        return [{"key": k, "label": lab, "min": lo, "max": hi, "unit": unit, "value": getattr(cfg, k),
+                 "overridden": k in ov} for k, (lab, lo, hi, unit) in config.EDITABLE.items()]
+
+    @app.put("/api/config")
+    def put_config(body: dict = Body(...)):
+        ov = db.get_setting("cfg_overrides", {})
+        ov.update(config.apply_overrides(cfg, body))
+        db.set_setting("cfg_overrides", ov)
+        icloud.poke()
+        airtag.poke()
+        return get_config()
 
     # ------------------------------------------------------------- iCloud
     @app.post("/api/icloud/login")
@@ -256,6 +273,15 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
             raise HTTPException(409, f"iCloud state is {icloud.state}")
         icloud.poll_once(force_locate=locate)
         return icloud.status()
+
+    @app.post("/api/icloud/locate/{dev_id:path}")
+    def icloud_locate_one(dev_id: str):
+        if icloud.state != "ok":
+            raise HTTPException(409, f"iCloud state is {icloud.state}")
+        try:
+            return icloud.locate_device(dev_id)
+        except KeyError as e:
+            raise HTTPException(404, str(e)) from e
 
     # ------------------------------------------------------------- AirTags
     @app.post("/api/airtag/login")

@@ -17,6 +17,7 @@ from .config import Config
 log = logging.getLogger("famloc.alerts")
 _email_lock = threading.Lock()
 
+STALE_CLASSES = ("iPhone", "iPad", "Watch")
 COUNTERS = {"emails_sent": 0, "emails_failed": 0, "events": 0}
 
 
@@ -142,6 +143,9 @@ class Alerter:
         now = time.time()
         for dev in db.q("SELECT * FROM devices WHERE source IN ('icloud','airtag') AND hidden=0"):
             if not dev["last_seen"]:
+                continue
+            # AirPods / Macs routinely go quiet for days; only carried devices are worth an alert.
+            if dev["source"] == "icloud" and not any(k in (dev["device_class"] or "") for k in STALE_CLASSES):
                 continue
             key = f"stale:{dev['id']}"
             flagged = db.get_setting(key, False)
