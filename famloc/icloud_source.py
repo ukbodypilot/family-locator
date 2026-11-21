@@ -141,10 +141,11 @@ class ICloudSource:
         log.warning("iCloud needs login: %s", why)
         if not db.get_setting("icloud_need_login_mailed", False):
             db.set_setting("icloud_need_login_mailed", True)
-            from .alerts import lan_url
+            from .alerts import links
             self.alerter.notify("auth", "iCloud re-login needed",
                                 f"Apple no longer accepts the saved iCloud session ({why}).\n"
-                                f"Polling has stopped. Log in again at {lan_url(self.cfg)}/#settings")
+                                f"Tracking has stopped until you sign in again on the Setup tab.\n\n"
+                                + links(self.cfg, "setup"))
 
     # ------------------------------------------------------------------ polling
     def poke(self) -> None:

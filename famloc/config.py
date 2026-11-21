@@ -17,7 +17,9 @@ class Config:
     # Web
     host: str = "0.0.0.0"
     port: int = 8790
-    public_url: str = ""  # used in alert emails; defaults to http://<lan-ip>:<port>
+    public_url: str = ""  # fixed public link for emails; blank = discover the gateway's Cloudflare tunnel
+    tunnel_metrics_url: str = "http://127.0.0.1:20241/quicktunnel"  # cloudflared reports its quick-tunnel host here
+    proxy_prefix: str = "/family/"  # path the radio-gateway proxies to this app
 
     # iCloud Find My polling
     poll_seconds: int = 300  # read Apple's cached positions this often

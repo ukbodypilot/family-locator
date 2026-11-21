@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__, analysis, config, db, geocode
-from .alerts import COUNTERS as ALERT_COUNTERS
+from .alerts import COUNTERS as ALERT_COUNTERS, lan_url, public_url
 
 log = logging.getLogger("famloc.web")
 STATIC = Path(__file__).resolve().parent / "static"
@@ -46,7 +46,8 @@ def _new_session(resp: Response) -> None:
     tok = secrets.token_urlsafe(32)
     db.x("INSERT INTO web_sessions(token,expires) VALUES(?,?)", (tok, time.time() + SESSION_DAYS * 86400))
     db.x("DELETE FROM web_sessions WHERE expires<?", (time.time(),))
-    resp.set_cookie(COOKIE, tok, max_age=SESSION_DAYS * 86400, httponly=True, samesite="strict")
+    # path="/" so the cookie covers every API path, directly on :8790 and under the gateway's /family/
+    resp.set_cookie(COOKIE, tok, max_age=SESSION_DAYS * 86400, httponly=True, samesite="strict", path="/")
 
 
 def _authed(req: Request) -> bool:
@@ -55,6 +56,16 @@ def _authed(req: Request) -> bool:
         return False
     r = db.q1("SELECT expires FROM web_sessions WHERE token=?", (tok,))
     return bool(r and r["expires"] > time.time())
+
+
+def _client_ip(req: Request) -> str:
+    """Real client: the gateway proxy (on this box) passes it in X-Forwarded-For; trust only that."""
+    host = req.client.host if req.client else "?"
+    if host in ("127.0.0.1", "::1"):
+        fwd = req.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if fwd:
+            return fwd
+    return host
 
 
 def _throttled(ip: str) -> bool:
@@ -68,6 +79,10 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
 
     @app.middleware("http")
     async def auth_mw(request: Request, call_next):
+        # The radio-gateway proxy only forwards GET and POST; the UI tunnels PUT/PATCH/DELETE as POST.
+        ov = request.headers.get("x-http-method-override", "").upper()
+        if request.method == "POST" and ov in ("PUT", "PATCH", "DELETE"):
+            request.scope["method"] = ov
         p = request.url.path
         if p in OPEN_PATHS or p.startswith("/static/"):
             return await call_next(request)
@@ -94,7 +109,7 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
 
     @app.post("/api/auth/login")
     def auth_login(request: Request, response: Response, body: dict = Body(...)):
-        ip = request.client.host if request.client else "?"
+        ip = _client_ip(request)
         if _throttled(ip):
             log.warning("[WebAccess] throttled login from %s", ip)
             raise HTTPException(429, "too many attempts, wait 5 minutes")
@@ -216,6 +231,7 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
     def status():
         return {"version": __version__, "icloud": icloud.status(), "airtag": airtag.status(),
                 "photos": photos.status(), "backup": db.get_setting("last_backup"),
+                "links": {"public": public_url(cfg), "lan": lan_url(cfg)},
                 "storage": {"db": str(db.DB_PATH), "points": db.q1("SELECT COUNT(*) AS n FROM points")["n"]}, "email": {"configured": alerter.email_configured(),
                                                      "recipient": cfg.email_recipient, **ALERT_COUNTERS},
                 "config": {k: getattr(cfg, k) for k in ("poll_seconds", "locate_minutes", "airtag_poll_minutes",
@@ -400,7 +416,7 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         # with a stale cached script.
         html = (STATIC / "index.html").read_text()
         for f in ("app.js", "app.css"):
-            html = html.replace(f"/static/{f}\"", f"/static/{f}?v={int((STATIC / f).stat().st_mtime)}\"")
+            html = html.replace(f"static/{f}\"", f"static/{f}?v={int((STATIC / f).stat().st_mtime)}\"")
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")

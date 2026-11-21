@@ -14,11 +14,16 @@ const H = 3600, D = 86400, GAP_BREAK = 6 * H, LANE_GAP = 3 * H;
 const isPhone = () => innerWidth < 820;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+// Served at "/" directly or at "/family/" behind the radio-gateway proxy: resolve API paths against
+// wherever this page lives.
+const BASE = location.pathname.replace(/[^/]*$/, "");
 async function api(path, opts = {}) {
   const o = { headers: {}, ...opts };
+  if (o.method && !["GET", "POST"].includes(o.method)) { o.headers["X-HTTP-Method-Override"] = o.method; o.method = "POST"; }
+  path = BASE + path.replace(/^\//, "");
   if (o.body && typeof o.body !== "string") { o.body = JSON.stringify(o.body); o.headers["Content-Type"] = "application/json"; }
   const r = await fetch(path, o);
-  if (r.status === 401 && !path.startsWith("/api/auth")) { showAuth(); throw new Error("Signed out. Sign in again."); }
+  if (r.status === 401 && !path.includes("api/auth/")) { showAuth(); throw new Error("Signed out. Sign in again."); }
   const ct = r.headers.get("content-type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
   if (!r.ok) throw new Error((data && data.detail) || (data && data.error) || r.statusText);
@@ -1027,6 +1032,10 @@ async function loadStatus() {
   const bk = st.backup;
   $("#storageLine").textContent = `${st.storage.points.toLocaleString()} fixes saved on disk in ${st.storage.db}. ` + (bk ? `Last daily backup ${ago(bk.ts)} (${(bk.bytes / 1024).toFixed(0)} KB); 14 are kept.` : "The first backup hasn't run yet.");
   $("#cfgLine").textContent = `Version ${st.version}.`;
+  const L1 = st.links || {};
+  $("#pubLink").innerHTML = L1.public ? `<a href="${esc(L1.public)}" target="_blank" rel="noopener">${esc(L1.public)}</a> <button class="name-it" id="copyPub">Copy</button>` : "The gateway's tunnel isn't running, so there's no outside link right now.";
+  $("#lanLink").innerHTML = L1.lan ? `At home: <a href="${esc(L1.lan)}">${esc(L1.lan)}</a>` : "";
+  if (L1.public) $("#copyPub").onclick = () => navigator.clipboard?.writeText(L1.public).then(() => toast("Copied the link."), () => toast(L1.public, 8000));
   return st;
 }
 const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch (e) { toast(e.message, 6000); } finally { if (btn) btn.disabled = false; loadStatus().catch(() => {}); } };
@@ -1054,6 +1063,21 @@ async function refreshAll() {
 }
 $("#trail").onchange = () => render();
 
+function handleHash() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (!h) return;
+  if (h.startsWith("focus=")) {
+    const key = h.slice(6);
+    const p = S.personByName[key] || S.people.find((x) => x.display === key);
+    const d = !p && S.byId[key];
+    openTab("people");
+    if (isPhone()) $("#app").classList.add("noside");
+    if (p) { const pos = personPos(p); if (pos) setTimeout(() => fly([pos.p[1], pos.p[2]], 16), 150); else toast(`No location for ${p.display} yet.`); }
+    else if (d && d.last) setTimeout(() => fly([d.last.lat, d.last.lon], 16), 150);
+  } else if (h === "lanes") { $("#timebar").scrollIntoView(); }
+  else if ($(`[data-tab="${h}"]`)) openTab(h);
+}
+
 let started = false;
 async function start() {
   $("#app").classList.remove("hidden");
@@ -1064,7 +1088,8 @@ async function start() {
   await Promise.all([loadDevices(), loadFences(), loadStatus().catch(() => {})]);
   S.lastRefresh = now();
   await setPreset(S.preset === "custom" ? "live" : S.preset);
-  const tab = location.hash.slice(1); if (tab && $(`[data-tab="${tab}"]`)) openTab(tab);
+  handleHash();
+  addEventListener("hashchange", handleHash);
   setInterval(() => { if (!document.hidden) refreshAll().catch(() => {}); }, 60000);
   setInterval(() => { if (!document.hidden) loadStatus().catch(() => {}); }, 20000);
   setInterval(() => { if (!document.hidden) updateBanner(); }, 15000);

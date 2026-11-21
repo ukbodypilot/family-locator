@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 import logging
 import math
 import smtplib
@@ -29,9 +30,11 @@ def haversine_m(lat1, lon1, lat2, lon2) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+_tunnel_cache: dict = {"ts": 0.0, "url": None}
+
+
 def lan_url(cfg: Config) -> str:
-    if cfg.public_url:
-        return cfg.public_url.rstrip("/")
+    """Direct link on the home network."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("192.168.2.1", 80))
@@ -39,7 +42,38 @@ def lan_url(cfg: Config) -> str:
         s.close()
     except OSError:
         ip = "localhost"
-    return f"http://{ip}:{cfg.port}"
+    return f"http://{ip}:{cfg.port}/"
+
+
+def public_url(cfg: Config) -> str | None:
+    """Link that works from anywhere: config override, else the gateway's Cloudflare quick tunnel
+    (its hostname changes whenever cloudflared restarts, so ask cloudflared each time, cached 60 s)."""
+    if cfg.public_url:
+        return cfg.public_url.rstrip("/") + "/"
+    now = time.time()
+    if now - _tunnel_cache["ts"] < 60:
+        return _tunnel_cache["url"]
+    url = None
+    try:
+        import requests
+        host = requests.get(cfg.tunnel_metrics_url, timeout=3).json().get("hostname")
+        if host:
+            url = f"https://{host}{cfg.proxy_prefix}"
+    except Exception as e:  # noqa: BLE001 - tunnel down: emails just carry the LAN link
+        log.info("no tunnel hostname: %s", e)
+    _tunnel_cache.update(ts=now, url=url)
+    return url
+
+
+def links(cfg: Config, fragment: str = "") -> str:
+    """Footer lines for emails: the anywhere link (via the gateway's tunnel) and the home-Wi-Fi link."""
+    frag = f"#{fragment}" if fragment else ""
+    out = []
+    pub = public_url(cfg)
+    if pub:
+        out.append(f"Open (phone, anywhere): {pub}{frag}")
+    out.append(f"Open (home Wi-Fi): {lan_url(cfg)}{frag}")
+    return "\n".join(out)
 
 
 class Alerter:
@@ -56,7 +90,9 @@ class Alerter:
         if not self.email_configured():
             return "email not configured"
         c = self.cfg
-        msg = MIMEText(body + f"\n\n-- family-locator  {lan_url(c)}\n", "plain", "utf-8")
+        if "Open (home Wi-Fi)" not in body:
+            body += "\n\n" + links(c)
+        msg = MIMEText(body + "\n\n-- Family Locator\n", "plain", "utf-8")
         msg["From"] = c.email_address
         msg["To"] = c.email_recipient
         msg["Subject"] = f"[Family Locator] {subject}"
@@ -126,6 +162,7 @@ class Alerter:
                 continue
             who = db.person_display(dev["owner"]) if dev.get("owner") else dev["name"]
             via = f" ({dev['name']})" if dev.get("owner") else ""
+            focus = "focus=" + quote(dev.get("owner") or dev["id"])
             when = time.strftime("%H:%M %a %d %b", time.localtime(ts))
             maps = f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lon:.6f}#map=16/{lat:.5f}/{lon:.5f}"
             if inside_now and not st["inside"]:
@@ -134,7 +171,7 @@ class Alerter:
                 if g["on_enter"]:
                     dup = self._person_already_alerted(dev.get("owner"), g["id"], "enter", ts)
                     self.notify("enter", f"{who} arrived at {g['name']}",
-                                f"{who} arrived at {g['name']} at {when}{via}.\n{maps}",
+                                f"{who} arrived at {g['name']} at {when}{via}.\n\n{links(self.cfg, focus)}\nMap: {maps}",
                                 device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup)
             elif outside_now and st["inside"]:
                 db.x("UPDATE fence_state SET inside=0, since=? WHERE geofence_id=? AND device_id=?",
@@ -142,7 +179,7 @@ class Alerter:
                 if g["on_exit"]:
                     dup = self._person_already_alerted(dev.get("owner"), g["id"], "exit", ts)
                     self.notify("exit", f"{who} left {g['name']}",
-                                f"{who} left {g['name']} at {when}{via} (now {d:.0f} m away).\n{maps}",
+                                f"{who} left {g['name']} at {when}{via} (now {d:.0f} m away).\n\n{links(self.cfg, focus)}\nMap: {maps}",
                                 device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup)
 
     def check_battery(self, dev: dict, battery: float | None) -> None:
@@ -154,7 +191,8 @@ class Alerter:
         if pct <= self.cfg.low_battery_pct and not flagged:
             db.set_setting(key, True)
             who = dev["name"] + (f" ({db.person_display(dev['owner'])})" if dev.get("owner") else "")
-            self.notify("battery", f"{who} battery {pct:.0f}%", f"{who} battery is at {pct:.0f}%.",
+            self.notify("battery", f"{who} battery {pct:.0f}%",
+                        f"{who} battery is at {pct:.0f}%.\n\n" + links(self.cfg, "focus=" + quote(dev.get("owner") or dev["id"])),
                         device_id=dev["id"])
         elif pct > self.cfg.low_battery_pct + 10 and flagged:
             db.set_setting(key, False)
@@ -176,7 +214,8 @@ class Alerter:
                 db.set_setting(key, True)
                 who = dev["name"] + (f" ({db.person_display(dev['owner'])})" if dev.get("owner") else "")
                 self.notify("stale", f"{who} has not reported for {age_h:.0f} h",
-                            f"{who} last reported a location {age_h:.1f} hours ago.", device_id=dev["id"])
+                            f"{who} last reported a location {age_h:.1f} hours ago.\n\n"
+                            + links(self.cfg, "focus=" + quote(dev.get("owner") or dev["id"])), device_id=dev["id"])
             elif age_h < self.cfg.stale_hours and flagged:
                 db.set_setting(key, False)
 
@@ -228,7 +267,11 @@ def build_digest(cfg: Config, now: float | None = None) -> tuple[str, str]:
         status = (f"at {inside[0]['name']} since {time.strftime('%H:%M', time.localtime(inside[0]['since']))}"
                   if inside else f"last fix {time.strftime('%H:%M %a', time.localtime(last_seen))}" if last_seen
                   else "no location")
+        pub = public_url(cfg)
+        person_link = f"    {(pub or lan_url(cfg))}#focus={quote(owner)}"
         lines.append(f"{db.person_display(owner)}: {status}. {s['km']} km, {len(s['trips'])} trips ({dev['name']})")
         lines += moves or ["    no arrivals or departures at saved places"]
+        lines.append(person_link)
         lines.append("")
+    lines.append(links(cfg, "lanes"))
     return f"Daily summary {time.strftime('%a %d %b', time.localtime(now))}", "\n".join(lines)
