@@ -1,77 +1,77 @@
 # Family Locator
 
-Self-hosted location history, geofence alerts and a map UI for every device in an iCloud Family
-Sharing group, plus AirTags and photo-GPS backfill.
+Where everyone in the family is, where they've been, and an email when they arrive or leave.
+Family Locator is a self-hosted app for an iCloud Family Sharing group. It keeps a history of Find
+My locations, shows people on a map and a per-person timeline, and sends alerts and a daily summary.
 
-- **iCloud Find My** (via [pyicloud](https://github.com/timlaing/pyicloud)): your devices and your
-  family's (`with_family`). Polls Apple's cached positions every `poll_seconds`, and asks for a
-  fresh fix every `locate_minutes`.
-- **AirTags** (via [FindMy.py](https://github.com/malmeloo/FindMy.py)): needs key files decrypted
-  on a Mac. Returns several days of history per poll.
-- **Photo history**: GPS from iCloud Photos metadata (no image download) or from a local folder's EXIF.
-- **Polling + alert settings editable in the UI** (Settings → Polling & alerts); per-device "⟳ locate now".
-- **History is durable**: SQLite on disk, `synchronous=FULL`, daily online backup to `data/backups/` (14 kept).
-- **Alerts by email**: arrive/leave a place (with hysteresis), low battery, phone/iPad/Watch stale, iCloud
-  re-login needed.
-- **Organised around people**: one marker per person, using their freshest phone, watch or iPad fix,
-  merged when people are at the same place; status lines like "At *School* since 08:12"; devices
-  folded underneath with a "⋯" menu (locate now, last known location, battery history, rename, hide).
-- **Timeline lanes**: one row per person, coloured by place, moving or elsewhere, with night shading
-  and hover details. A "Viewing … / Back to now" banner makes history mode obvious.
-- **Alert rules**: per place and per person, one alert when phone and watch cross together, quiet
-  hours, and a daily summary email (preview and send-now on the Alerts tab).
-- **Map UI**: 10 base maps (OSM, Esri streets/grey/dark/satellite/hybrid/topo, OpenTopoMap, CyclOSM,
-  Humanitarian); overlays for tracks, accuracy, dots, heatmap, stays, places and photos; search for
-  people, places, addresses and `lat, lon`; a timeline with presets, custom range, a per-device
-  activity histogram, scrubbing, playback at 1 min/s to 1 week/s, and trail length; right-click
-  "what's here / create place"; Insights (km, trips, stays, top places, distance per day).
+![Family Locator on a desktop: people list, map with tracks, and the per-person timeline](docs/images/overview.png)
 
-## Credentials
+*Screenshots use made-up demo data.*
 
-- The **Apple ID password is never written to disk.** You type it in the Settings tab. Only
-  pyicloud's session/trust cookies persist, in `data/icloud_session/` (0700). When Apple
-  expires them you get an email and log in again.
-- FindMy.py's saved account state has its password field blanked before it is saved.
-- The web UI has its own password, set on first visit (PBKDF2, login throttling, `[WebAccess]` log lines).
-- Search and "what's here?" go to OpenStreetMap Nominatim. Only what you type or click is sent;
-  device positions are never sent automatically.
+## What it does
 
-## Run
+- **Keeps a location history Apple doesn't.** Find My only shows where a device is now. Family
+  Locator checks it every few minutes and saves each new fix, so you build up a history. It survives
+  restarts and has a daily backup.
+- **Shows people, not devices.** Each person appears once, placed by their freshest iPhone, Watch
+  or iPad fix. Their status reads like "At *School* since 08:12". Everyone at the same place shares
+  one marker.
+- **Timeline lanes.** One row per person, coloured by where they were. Drag the timeline to see
+  any moment, or press play to watch a day go by.
+- **Places and alerts.** Draw Home, School or Work, then get an email when someone arrives or
+  leaves. You can limit a place to certain people, for example "only Sam at School".
+- **Daily summary email.** Every evening: who went where, how far, and a link per person.
+- **Works on a phone, from anywhere,** through the radio gateway's Cloudflare tunnel. Email links
+  always carry the current address.
+- **Rich map.** 11 base maps including satellite, hybrid, terrain and two dark styles, zoom to
+  street-entrance level, search for people, places, addresses and coordinates, and a heatmap.
+- **Insights.** Distance per day, trips, stays, the places someone visits most, and battery over time.
+- **Extras.** AirTag history through FindMy.py (needs keys from a Mac). Past locations backfilled
+  from iCloud Photos or a photo folder.
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp config.example.toml data/config.toml   # fill in email settings
-.venv/bin/python -m famloc.main           # http://<host>:8790
-```
-
-On .140 it runs as a user service (linger is on):
-
-```bash
-ln -sf ~/Downloads/family-locator/deploy/family-locator.service ~/.config/systemd/user/
-systemctl --user enable --now family-locator
-journalctl --user-unit family-locator -f
-```
-
-## AirTag keys
-
-On a Mac signed in to the same Apple ID: `pip install findmy && python -m findmy decrypt --out-dir keys`.
-Copy the JSON files into `data/airtags/`. Recent macOS versions make the Find My cache harder to
-decrypt, so expect some fiddling.
-
-## Layout
-
-| path | what |
+| History with the timeline | On a phone |
 |---|---|
-| `famloc/icloud_source.py` | pyicloud login/2FA state machine + poller |
-| `famloc/airtag_source.py` | FindMy.py login + AirTag history poller (single worker thread) |
-| `famloc/photos_import.py` | iCloud Photos / folder EXIF backfill |
-| `famloc/alerts.py` | geofence, battery, stale checks; SMTP |
-| `famloc/analysis.py` | stays / trips / per-day distance |
-| `famloc/web.py` | FastAPI API + auth; `/metrics` for Prometheus |
-| `famloc/static/` | Leaflet UI (vendored, no CDN) |
-| `data/` | gitignored: SQLite DB, config, sessions, AirTag keys |
+| ![Viewing a past moment: banner with Back to now, hover details on a timeline lane](docs/images/history-lanes.png) | ![Phone layout: map with the people panel as a bottom sheet](docs/images/phone-people.png) |
 
-Tests: `FAMLOC_DATA=$(mktemp -d) .venv/bin/python tests/test_core.py`.
-Demo data for UI work: `FAMLOC_DATA=~/famloc-scratch/data .venv/bin/python tools/seed_demo.py`.
+## Quick start
 
-Tell your family members their locations are being logged.
+```bash
+git clone https://github.com/ukbodypilot/family-locator ~/Downloads/family-locator
+cd ~/Downloads/family-locator
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+mkdir -p data && cp config.example.toml data/config.toml   # add Gmail details for alerts
+.venv/bin/python -m famloc.main                            # then open http://<this machine>:8790
+```
+
+On first visit you choose a password for the page. Then sign in to iCloud on the **Setup** tab
+with your Apple ID and the 2FA code. Your family's devices appear within a minute. The full
+walkthrough, including running it as a service, is in [Getting started](docs/getting-started.md).
+
+## Documentation
+
+| Guide | What's in it |
+|---|---|
+| [Getting started](docs/getting-started.md) | Install, first sign-in, adding places, running as a service |
+| [Using the app](docs/user-guide.md) | People, map, timeline, search, places, insights, every control |
+| [Alerts and the daily summary](docs/alerts.md) | What triggers an email, per-person rules, quiet hours |
+| [Phone access](docs/phone-access.md) | Using it from anywhere through the radio gateway's tunnel |
+| [AirTags and photo history](docs/airtags-and-photos.md) | FindMy.py keys, importing past locations from photos |
+| [Configuration](docs/configuration.md) | Every setting, in the UI and in `data/config.toml` |
+| [Privacy and security](docs/privacy-and-security.md) | What's stored, where, what leaves the machine, passwords |
+| [Troubleshooting](docs/troubleshooting.md) | Common problems and how to fix them |
+| [How it works](docs/architecture.md) | Modules, data model, polling, the HTTP API |
+
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## Requirements
+
+- Python 3.11 or newer (developed on 3.14, Arch Linux).
+- An Apple ID in a Family Sharing group, with location sharing turned on by each member.
+- For email: a Gmail address with an [app password](https://myaccount.google.com/apppasswords).
+- For phone access from outside the home: the radio gateway with its Cloudflare tunnel (see
+  [Phone access](docs/phone-access.md)), or any reverse proxy you point at port 8790.
+
+Find My access uses the unofficial iCloud web API through
+[pyicloud](https://github.com/timlaing/pyicloud). Apple can change it at any time.
+
+Tell your family that their locations are being logged.

@@ -1,14 +1,30 @@
-# family-locator config (gitignored). Defaults + every option: famloc/config.py
+# Family Locator settings. Copy to data/config.toml (not in git) and restart after editing.
+# Every option and its default: docs/configuration.md. Settings marked (UI) can also be
+# changed in the app, where they apply immediately.
+
 port = 8790
-poll_seconds = 300      # read Apple's cached positions this often
-locate_minutes = 15     # ask devices for a FRESH fix this often (battery cost); 0 = never
-airtag_poll_minutes = 15
-low_battery_pct = 15
-stale_hours = 12
+
+[tracking]
+poll_seconds = 300        # (UI) read the positions Apple already has, this often
+locate_minutes = 15       # (UI) ask devices for a fresh fix this often; 0 = never (uses battery)
+airtag_poll_minutes = 15  # (UI)
+
+[alerts]
+low_battery_pct = 15      # (UI) 0 = off
+stale_hours = 12          # (UI) 0 = off
+digest_hour = 20          # (UI) daily summary email at this local hour; -1 = off
+quiet_from_hour = -1      # (UI) no alert emails from this hour...
+quiet_to_hour = -1        # (UI) ...until this hour; -1 = off
+
+[links]
+# Outside links in emails. Blank = use the radio gateway's Cloudflare quick tunnel,
+# whose address is read from cloudflared each time.
+public_url = ""
+proxy_prefix = "/family/"
 
 [email]
 # Gmail address + an app password (https://myaccount.google.com/apppasswords).
-# The radio-gateway's EMAIL_* values in gateway_config.txt can be reused here.
+# On the gateway machine these match the radio gateway's EMAIL_* settings.
 email_address = ""
 email_app_password = ""
-email_recipient = ""    # comma-separated; blank = email_address
+email_recipient = ""      # comma-separated; blank = email_address

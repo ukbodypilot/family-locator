@@ -980,8 +980,15 @@ async function loadInsights() {
 $("#evKind").onchange = loadEvents;
 async function loadEvents() {
   const ev = await api(`/api/events?limit=300&kind=${$("#evKind").value}`);
-  $("#eventList").innerHTML = ev.map((e) => `<div class="ev"><i class="${esc(e.kind)}"></i><span>${esc(e.message).replace(/\n/g, "<br>").replace(/(https:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">map</a>')}</span>
-    <span class="t">${esc(dt(e.ts))}${e.emailed ? ", emailed" : e.email_error === "quiet hours" ? ", not emailed (quiet hours)" : e.email_error ? `, email failed: ${esc(e.email_error)}` : ""}</span></div>`).join("") || '<p class="muted">Nothing has happened yet. Arrivals, departures and warnings will be listed here.</p>';
+  $("#eventList").innerHTML = ev.map((e) => {
+    // Emails carry link lines; in the app show the sentence and one action instead.
+    const text = String(e.message).split(/\n\s*\n/)[0];
+    const focus = (String(e.message).match(/#focus=([^\s]+)/) || [])[1];
+    const mail = e.emailed ? ", emailed" : e.email_error === "quiet hours" ? ", not emailed (quiet hours)" : e.email_error ? `, email failed: ${esc(e.email_error)}` : "";
+    return `<div class="ev"><i class="${esc(e.kind)}"></i><span>${esc(text).replace(/\n/g, "<br>")}${focus ? ` <button class="name-it" data-focus="${esc(focus)}">Show on map</button>` : ""}</span>
+      <span class="t">${esc(dt(e.ts))}${mail}</span></div>`;
+  }).join("") || '<p class="muted">Nothing has happened yet. Arrivals, departures and warnings will be listed here.</p>';
+  $("#eventList").onclick = (ev2) => { const b = ev2.target.closest("[data-focus]"); if (b) { location.hash = "focus=" + b.dataset.focus; } };
 }
 const ALERT_KEYS = ["quiet_from_hour", "quiet_to_hour", "digest_hour", "low_battery_pct", "stale_hours", "geofence_exit_margin_m", "max_alert_accuracy_m"];
 const TRACK_KEYS = ["poll_seconds", "locate_minutes", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];

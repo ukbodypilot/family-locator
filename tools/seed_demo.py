@@ -51,6 +51,15 @@ db.upsert_device("photos:icloud", "photos", "iCloud Photos", owner="Alex", model
 for i in range(300):
     p = random.choice(list(PLACES.values()))
     db.add_point("photos:icloud", now - random.uniform(0, 400 * 86400), p[0] + random.gauss(0, 0.01), p[1] + random.gauss(0, 0.01), kind="photo")
-db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices) VALUES('Home',?,?,150,'#16a34a',1,1,'[]')", HOME)
-db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices) VALUES('School',?,?,200,'#d97706',1,1,'[]')", PLACES["School"])
-print(db.q1("SELECT COUNT(*) n FROM points"))
+for name, color, r in (("Home", "#577f5b", 150), ("School", "#b7791f", 200), ("Work", "#3f7fa3", 250)):
+    la, lo = PLACES[name]
+    db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices,people) VALUES(?,?,?,?,?,1,1,'[]','[]')",
+         (name, la, lo, r, color))
+
+# Replay the last two days through the real alert logic (email off) so the activity log has entries.
+from famloc.alerts import Alerter  # noqa: E402
+al = Alerter(config.Config(email_enabled=False))
+for dev in db.q("SELECT * FROM devices WHERE source='icloud'"):
+    for pt in db.q("SELECT ts,lat,lon,acc FROM points WHERE device_id=? AND ts>? ORDER BY ts", (dev["id"], now - 2 * 86400)):
+        al.check_fix(dev, pt["ts"], pt["lat"], pt["lon"], pt["acc"])
+print(db.q1("SELECT COUNT(*) n FROM points"), db.q1("SELECT COUNT(*) n FROM events"))
