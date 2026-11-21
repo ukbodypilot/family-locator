@@ -105,6 +105,158 @@ def test_person_display_name():
     assert "Kiddo:" in build_digest(cfg)[1]
 
 
+def test_tracker_intervals_and_overrides():
+    from famloc.tracking import Tracker
+    c = config.Config(locate_minutes=15, moving_locate_minutes=2)
+    t = Tracker(c)
+    t.set_person("Kid", locate_minutes=5)
+    t.set_person("Gran", locate_minutes=0)
+    assert t.interval_minutes("Kid", 0) == 5 and t.interval_minutes("Other", 0) == 15
+    assert t.due(["Gran"], 1000) == []            # never
+    t.set_person("Kid", locate_minutes=1)          # clamped to the 2-minute floor
+    assert t.person_settings("Kid")["locate_minutes"] == 2
+    t.set_person("Kid", locate_minutes=None)       # back to the default
+    assert "locate_minutes" not in t.person_settings("Kid")
+    db.set_setting("person_tracking", {})
+
+
+def test_tracker_due_staggers_then_respects_interval():
+    from famloc.tracking import Tracker
+    t = Tracker(config.Config(locate_minutes=15))
+    assert t.due(["A", "B", "C"], 10_000) == ["A"]          # B, C staggered 20 s / 40 s later
+    assert t.due(["A", "B", "C"], 10_025) == ["A", "B"]     # A not marked sent yet
+    for o in ("A", "B", "C"):
+        t.mark_sent(o, 10_050)
+    assert t.due(["A", "B", "C"], 10_050 + 14 * 60) == []
+    assert t.due(["A", "B", "C"], 10_050 + 15 * 60) == ["A", "B", "C"]
+
+
+def test_tracker_movement_ignores_wobble():
+    from famloc.tracking import Tracker
+    t = Tracker(config.Config(movement_threshold_m=250, follow_rest_minutes=10))
+    still = [(0, 40.0, -100.0, 30), (120, 40.0009, -100.0, 65)]     # ~100 m apart, wobble
+    assert not t.moving(still)
+    poor = [(0, 40.0, -100.0, 400), (120, 40.005, -100.0, 300)]     # 556 m but accuracy 700 m
+    assert not t.moving(poor)
+    drive = [(0, 40.0, -100.0, 10), (120, 40.004, -100.0, 10)]      # 445 m in 2 min
+    assert t.moving(drive)
+    stale = [(0, 40.0, -100.0, 10), (3000, 40.004, -100.0, 10)]     # previous fix too old to compare
+    assert not t.moving(stale)
+
+
+def test_tracker_follow_lifecycle_and_cap():
+    from famloc.tracking import Tracker
+    c = config.Config(locate_minutes=15, moving_locate_minutes=2, follow_rest_minutes=10, follow_max_hours=1)
+    t = Tracker(c)
+    drive = [(1000, 40.0, -100.0, 10), (1120, 40.004, -100.0, 10)]
+    assert t.on_fixes("Kid", drive, 1120)
+    assert t.following("Kid", 1121) == "moving" and t.interval_minutes("Kid", 1121) == 2
+    assert t.due(["Kid"], 1121) == ["Kid"]                         # first fast locate is due at once
+    t.mark_sent("Kid", 1121)
+    parked = [(1120, 40.004, -100.0, 10)]
+    for k in range(1, 6):                                          # 2-minute fixes, parked
+        parked.append((1120 + k * 120, 40.0041, -100.0, 10))
+        still_following = t.on_fixes("Kid", parked, parked[-1][0])
+        assert still_following == (k < 4), (k, still_following)    # needs ~8 of the 10 rest minutes
+    assert t.following("Kid", parked[-1][0] + 1) is None
+    # runaway cap: keeps "moving" for over an hour -> stops and cools down
+    t2 = Tracker(c)
+    now = 0
+    for i in range(40):
+        now = i * 120
+        t2.on_fixes("Car", [(now - 120, 40.0 + i * 0.004, -100.0, 10), (now, 40.004 + i * 0.004, -100.0, 10)], now)
+    assert t2.following("Car", now + 1) is None and t2.cap_until["Car"] > now
+    db.set_setting("person_tracking", {"Off": {"follow": False}})
+    assert not t.on_fixes("Off", drive, 1120)
+    db.set_setting("person_tracking", {})
+
+
+def test_tracker_manual_follow():
+    from famloc.tracking import Tracker
+    t = Tracker(config.Config(locate_minutes=15, moving_locate_minutes=2))
+    t.start_manual("Kid", 30, 5000)
+    assert t.following("Kid", 5001) == "manual" and t.due(["Kid"], 5001) == ["Kid"]
+    t.start_manual("Kid", 0, 5100)
+    assert t.following("Kid", 5101) is None
+
+
+def test_poller_follows_a_moving_person_end_to_end():
+    """Fake Find My: a phone drives ~4 km then parks. The poller must locate on the normal
+    interval, switch to 2-minute locates while moving, and drop back once parked."""
+    from famloc import icloud_source
+    from famloc.icloud_source import ICloudSource
+
+    class FakeDev:
+        def __init__(self, data): self.data = data
+    class FakeMgr:
+        def __init__(self):
+            self.t = 0.0; self.lat = 41.5; self.posts = []; self.reads = 0
+            self.user_info = {"firstName": "Pat", "lastName": "", "membersInfo": {}}
+            self._server_ctx = {}; self._fmip_refresh_url = "x"; self.params = {}
+            self._refresh_lock = threading.Lock()
+            mgr = self
+            class Sess:
+                def post(self, url, params=None, json=None, timeout=None):
+                    mgr.posts.append(mgr.t)
+                    class R:
+                        def json(self_inner): return {"serverContext": {}}
+                    return R()
+            self.session = Sess()
+        def _dev(self):
+            return FakeDev({"id": "raw1", "deviceDiscoveryId": "pat-phone", "name": "Pat's iPhone",
+                            "deviceClass": "iPhone", "deviceDisplayName": "iPhone", "batteryLevel": 0.8,
+                            "locationCapable": True,
+                            "location": {"latitude": self.lat, "longitude": -100.0, "horizontalAccuracy": 10,
+                                         "timeStamp": int(self.t * 1000)}})
+        def __iter__(self): return iter([self._dev()])
+        def refresh(self, locate=False): self.reads += 1
+
+    import threading
+    cfg2 = config.Config(email_enabled=False, poll_seconds=300, locate_minutes=15, moving_locate_minutes=2,
+                         follow_rest_minutes=10, movement_threshold_m=250)
+    src = ICloudSource(cfg2, Alerter(cfg2))
+    mgr = FakeMgr()
+    class Api: devices = mgr
+    src.api = Api(); src.state = "ok"
+    real_time = icloud_source.time.time
+    clock = {"t": 2_000_000.0}
+    icloud_source.time.time = lambda: clock["t"]
+    try:
+        def run(seconds, speed_deg_per_tick=0.0):
+            for _ in range(int(seconds / 15)):
+                clock["t"] += 15; mgr.t = clock["t"]; mgr.lat += speed_deg_per_tick
+                src.tick(clock["t"])
+        run(30 * 60)                                  # parked 30 min: locates every 15 min
+        parked_posts = len(mgr.posts)
+        assert 2 <= parked_posts <= 3, mgr.posts
+        run(20 * 60, speed_deg_per_tick=0.0005)       # driving ~6.7 km in 20 min
+        assert src.tracker.following("Pat", clock["t"]) == "moving"
+        drive_posts = len(mgr.posts) - parked_posts
+        assert drive_posts >= 7, drive_posts          # roughly every 2 min
+        run(30 * 60)                                  # parked again
+        assert src.tracker.following("Pat", clock["t"]) is None
+        gaps = [b - a for a, b in zip(mgr.posts, mgr.posts[1:])]
+        assert gaps[-1] >= 15 * 60 - 15, gaps[-3:]    # back on the normal interval
+    finally:
+        icloud_source.time.time = real_time
+
+
+def test_tracker_devices_never_compared_with_each_other():
+    from famloc.tracking import Tracker
+    t = Tracker(config.Config(movement_threshold_m=250, follow_rest_minutes=10))
+    ipad_home = [(1000, 40.0, -100.0, 10), (1300, 40.0, -100.0, 10)]
+    phone_away = [(1100, 40.02, -100.0, 10), (1250, 40.0201, -100.0, 10)]   # 2 km from the iPad, not moving
+    assert not t.on_fixes("Me", [ipad_home, phone_away], 1300)
+    # following stops only when nobody's device moved in the rest window
+    phone_drive = [(2000, 40.0, -100.0, 10), (2120, 40.005, -100.0, 10)]
+    assert t.on_fixes("Me", [ipad_home, phone_drive], 2120)
+    phone_parked = phone_drive + [(2120 + k * 120, 40.0051, -100.0, 10) for k in range(1, 6)]
+    ipad_rest = [(1700 + k * 120, 40.0, -100.0, 10) for k in range(0, 6)]     # covers 1700..2300
+    assert t.on_fixes("Me", [ipad_rest, phone_parked[:3]], 2300)      # iPad at rest, but phone moved in window
+    ipad_rest2 = [(1700 + k * 120, 40.0, -100.0, 10) for k in range(0, 9)]    # ..2660
+    assert not t.on_fixes("Me", [ipad_rest2, phone_parked], 2720)     # phone's window now clear: stop
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

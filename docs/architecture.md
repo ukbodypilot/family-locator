@@ -23,7 +23,8 @@ Leaflet, with no build step.
 | `famloc/main.py` | Starts everything; housekeeping loop: stale-device check, daily backup, daily summary. |
 | `famloc/config.py` | `Config` defaults, `config.toml` loading, the UI-editable settings and their limits. |
 | `famloc/db.py` | Schema and migrations, one connection per thread (WAL, `synchronous=FULL`), helpers, backup. |
-| `famloc/icloud_source.py` | pyicloud sign-in and 2FA, session resume, polling, single-device locate, saving fixes. |
+| `famloc/icloud_source.py` | pyicloud sign-in and 2FA, session resume, the 15-second tick, single-device locates, saving fixes. |
+| `famloc/tracking.py` | Per-person locate scheduling, movement and rest detection, follow mode. Pure logic, unit-tested. |
 | `famloc/airtag_source.py` | FindMy.py sign-in and AirTag history fetch, on one worker thread (its sync wrapper owns an asyncio loop). |
 | `famloc/photos_import.py` | Background imports from iCloud Photos metadata and from folder EXIF. |
 | `famloc/alerts.py` | Place, battery and stale checks; quiet hours; per-person dedupe; SMTP; links; the daily summary. |
@@ -49,16 +50,21 @@ kept in `settings` under the owner's Apple name.
 
 ## Polling
 
-1. **Every `poll_seconds`:** the iCloud thread refreshes Find My, including family members'
-   devices. Every `locate_minutes` the refresh also asks devices to locate. Fresh answers take
-   5–30 seconds, so after a locate the app reads at 8 s and again at 20 s.
-2. **Each device:** it upserts the device row and stores the fix if its timestamp is new.
-3. **Each new fix:** it runs the place checks. Battery is checked on every read.
-4. **Session failure:** a failed session moves the state to `need_login` and sends one email.
-   Polling resumes after you sign in again.
+The iCloud thread ticks every 15 seconds:
 
-**Locate now** sends Find My's `selectedDevice` request for one device, then re-reads every 6
-seconds for up to 36 seconds until that device's timestamp changes.
+1. **Fresh locations.** `famloc/tracking.py` decides which people are due: their own interval, or 2
+   minutes while followed. For each one, the thread sends Find My's single-device locate
+   (`selectedDevice`) for their main device, and returns straight away.
+2. **Reading.** It refreshes Find My, including family members' devices, every `poll_seconds`,
+   or every 10 seconds for 50 seconds after a fresh-location request, to collect the answer.
+3. **Each device:** it upserts the device row and stores the fix if its timestamp is new, then runs
+   the place checks. Battery is checked on every read.
+4. **New fixes from a person's phone, Watch or iPad:** these feed the movement check, which starts,
+   extends or ends following (see [Tracking and following](tracking.md)).
+5. **Session failure:** a failed session moves the state to `need_login` and sends one email.
+
+**Locate now** on a device blocks for up to 36 seconds and re-reads every 6 seconds, so the UI can
+report the result. **Locate everyone now** sends one all-devices locate.
 
 ## How the UI places people
 
@@ -87,8 +93,9 @@ Bodies are JSON. Behind the gateway, PUT, PATCH and DELETE arrive as POST with
 | POST | `/api/auth/change` | `{old, new}`. |
 | GET | `/api/devices` | All devices with their latest fix and fix count. |
 | PATCH | `/api/devices/{id}` | `{name?, hidden?, color?}`. |
-| GET | `/api/people` | `[{name, display, color}]`. |
-| PATCH | `/api/people/{name}` | `{display?, color?}`; a blank display name resets it. |
+| GET | `/api/people` | `[{name, display, color, tracking}]`; tracking includes the effective interval, following state and next fresh location. |
+| PATCH | `/api/people/{name}` | `{display?, color?, locate_minutes?, follow?}`; `null` resets to the default. |
+| POST | `/api/people/{name}/follow` | `{minutes}`: follow now; 0 stops. |
 | GET | `/api/points?start&end[&devices][&max_acc]` | Fixes in a range, grouped by device: `[ts, lat, lon, acc, battery, kind, meta]`. |
 | GET | `/api/range` | First and last fix time, and the count. |
 | GET | `/api/analysis?device&start&end` | km, stays, trips, per-day km, top places. |
@@ -112,7 +119,7 @@ Bodies are JSON. Behind the gateway, PUT, PATCH and DELETE arrive as POST with
 
 `tests/test_core.py` covers place enter/exit with the margin, ignoring stale and inaccurate fixes,
 one email per person, people filters, quiet hours, battery alert re-arming, stays and trips,
-duplicate fixes, display names and the daily summary.
+duplicate fixes, display names, the daily summary, the tracker (intervals, staggering, movement versus GPS wobble, follow and rest, the safety cap, manual follow), and a simulated drive through the real poller against a fake Find My.
 
 ```bash
 FAMLOC_DATA=$(mktemp -d) .venv/bin/python tests/test_core.py

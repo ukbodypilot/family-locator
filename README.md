@@ -20,6 +20,8 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
   any moment, or press play to watch a day go by.
 - **Places and alerts.** Draw Home, School or Work, then get an email when someone arrives or
   leaves. You can limit a place to certain people, for example "only Sam at School".
+- **Follows people while they move.** Each person has their own fresh-location interval. When
+  someone sets off they're located every 2 minutes until they've stopped.
 - **Daily summary email.** Every evening: who went where, how far, and a link per person.
 - **Works on a phone, from anywhere,** through the radio gateway's Cloudflare tunnel. Email links
   always carry the current address.
@@ -53,6 +55,7 @@ walkthrough, including running it as a service, is in [Getting started](docs/get
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, first sign-in, adding places, running as a service |
 | [Using the app](docs/user-guide.md) | People, map, timeline, search, places, insights, every control |
+| [Tracking and following](docs/tracking.md) | Per-person intervals, following people while they move, battery |
 | [Alerts and the daily summary](docs/alerts.md) | What triggers an email, per-person rules, quiet hours |
 | [Phone access](docs/phone-access.md) | Using it from anywhere through the radio gateway's tunnel |
 | [AirTags and photo history](docs/airtags-and-photos.md) | FindMy.py keys, importing past locations from photos |

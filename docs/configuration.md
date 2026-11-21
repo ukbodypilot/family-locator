@@ -26,9 +26,16 @@ inside any `[section]`; sections are only for readability.
 | Key | Default | UI | Meaning |
 |---|---|---|---|
 | `poll_seconds` | 300 | yes | How often to read the positions Apple already has (60–3600 s). Costs nothing on the devices. |
-| `locate_minutes` | 15 | yes | How often to ask every device for a fresh fix (0 = never, at least 5). Wakes family devices and uses some battery. |
+| `locate_minutes` | 15 | yes | Default fresh-location interval per person (0 = never, at least 2). Each person can override it. Wakes the phone and uses some battery. |
+| `follow_moving` | true | yes | Follow people while they move (each person can override it). |
+| `moving_locate_minutes` | 2 | yes | Fresh-location interval while following (1–15 min). |
+| `follow_rest_minutes` | 10 | yes | Stop following after no movement for this long. |
+| `follow_max_hours` | 4 | yes | Longest single follow. |
+| `movement_threshold_m` | 250 | yes | How far apart two fixes must be to count as moving (also beyond their combined accuracy). |
 | `with_family` | true | | Include Family Sharing members' devices. |
 | `airtag_poll_minutes` | 15 | yes | How often to fetch AirTag history (5–1440 min). |
+
+Per-person intervals and follow switches are set on the Setup tab and stored in the database. See [Tracking and following](tracking.md).
 
 ## Email and alerts
 

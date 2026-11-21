@@ -38,6 +38,10 @@ class ICloudSource:
         self.last_ok = 0.0
         self.counters = {"polls": 0, "poll_errors": 0, "new_points": 0, "devices": 0}
         self._wake = threading.Event()
+        from .tracking import Tracker
+        self.tracker = Tracker(cfg)
+        self.last_read = 0.0
+        self.pending_until = 0.0
         SESSION_DIR.mkdir(parents=True, exist_ok=True)
         os.chmod(SESSION_DIR, 0o700)
 
@@ -151,13 +155,81 @@ class ICloudSource:
     def poke(self) -> None:
         self._wake.set()
 
+    TICK_S = 15
+
     def run_forever(self, stop: threading.Event) -> None:
+        """Tick every 15 s: send any per-person locates that are due, and read Find My when the
+        read interval has passed or a locate is waiting for its answer."""
         self.resume()
         while not stop.is_set():
             if self.state == "ok":
-                self.poll_once()
-            self._wake.wait(timeout=self.cfg.poll_seconds)
+                self.tick()
+            self._wake.wait(timeout=self.TICK_S)
             self._wake.clear()
+
+    def _owners(self) -> list[str]:
+        return [r["owner"] for r in db.q(
+            "SELECT owner, MIN(first_seen) f FROM devices WHERE source='icloud' AND owner IS NOT NULL "
+            "AND hidden=0 GROUP BY owner ORDER BY f")]
+
+    def tick(self, now: float | None = None) -> None:
+        from pyicloud.exceptions import (PyiCloud2FARequiredException, PyiCloudAuthRequiredException,
+                                         PyiCloudFailedLoginException)
+        from .alerts import primary_device
+        now = now or time.time()
+        with self.lock:
+            if self.api is None:
+                return
+            try:
+                mgr = self.api.devices
+                sent = False
+                for owner in self.tracker.due(self._owners(), now):
+                    dev = primary_device(owner, now - 86400, now)
+                    if dev is None or json.loads(dev["meta"] or "{}").get("locationCapable") is False:
+                        self.tracker.mark_sent(owner, now)  # nothing locatable; try again next interval
+                        continue
+                    if self._request_locate(mgr, dev["id"]):
+                        self.last_locate = now
+                        sent = True
+                    self.tracker.mark_sent(owner, now)
+                if sent:
+                    self.pending_until = now + 50  # answers take ~5-30 s
+                waiting = self.pending_until > now and now - self.last_read >= 10
+                if now - self.last_read >= self.cfg.poll_seconds or waiting:
+                    self.last_poll = now
+                    self.counters["polls"] += 1
+                    mgr.refresh(locate=False)
+                    self._ingest(mgr)
+                    self.last_read = now
+                    self.last_ok = time.time()
+                    if self.state_detail.startswith("poll error"):
+                        self.state_detail = "polling"
+            except (PyiCloudFailedLoginException, PyiCloud2FARequiredException,
+                    PyiCloudAuthRequiredException) as e:
+                self._set_need_login(f"{type(e).__name__}: {e}")
+            except Exception as e:  # noqa: BLE001
+                self.counters["poll_errors"] += 1
+                self.state_detail = f"poll error: {type(e).__name__}: {e}"
+                log.warning("tick error: %s", traceback.format_exc())
+
+    def _request_locate(self, mgr, dev_id: str) -> bool:
+        """Send Find My's single-device locate (selectedDevice) and return straight away."""
+        from pyicloud.services.findmyiphone import _FMIP_CLIENT_CONTEXT_TIMEZONE
+        target = next((dv for dv in mgr if self._dev_id(dict(dv.data)) == dev_id), None)
+        if target is None:
+            return False
+        req = {"clientContext": {"appName": "iCloud Find (Web)", "appVersion": "2.0", "apiVersion": "3.0",
+                                 "deviceListVersion": 1, "fmly": self.cfg.with_family,
+                                 "timezone": _FMIP_CLIENT_CONTEXT_TIMEZONE, "inactiveTime": 0,
+                                 "shouldLocate": True, "selectedDevice": target.data["id"]},
+               "serverContext": mgr._server_ctx}
+        with mgr._refresh_lock:
+            resp = mgr.session.post(mgr._fmip_refresh_url, params=mgr.params, json=req, timeout=20).json()
+            if resp.get("serverContext"):
+                mgr._server_ctx = resp["serverContext"]
+                mgr._server_ctx["theftLoss"] = None
+        self.counters["single_locates"] = self.counters.get("single_locates", 0) + 1
+        return True
 
     def poll_once(self, force_locate: bool = False) -> None:
         from pyicloud.exceptions import (PyiCloud2FARequiredException, PyiCloudAuthRequiredException,
@@ -198,7 +270,6 @@ class ICloudSource:
 
     def locate_device(self, dev_id: str) -> dict:
         """Ask ONE device for a fresh fix (Find My's selectedDevice), wait for it, ingest."""
-        from pyicloud.services.findmyiphone import _FMIP_CLIENT_CONTEXT_TIMEZONE
         with self.lock:
             if self.api is None:
                 raise KeyError("not logged in")
@@ -207,17 +278,7 @@ class ICloudSource:
             if target is None:
                 raise KeyError(f"{dev_id} not in the current Find My device list")
             before = (target.data.get("location") or {}).get("timeStamp")
-            req = {"clientContext": {"appName": "iCloud Find (Web)", "appVersion": "2.0", "apiVersion": "3.0",
-                                     "deviceListVersion": 1, "fmly": self.cfg.with_family,
-                                     "timezone": _FMIP_CLIENT_CONTEXT_TIMEZONE, "inactiveTime": 0,
-                                     "shouldLocate": True, "selectedDevice": target.data["id"]},
-                   "serverContext": mgr._server_ctx}
-            with mgr._refresh_lock:
-                resp = mgr.session.post(mgr._fmip_refresh_url, params=mgr.params, json=req).json()
-                if resp.get("serverContext"):
-                    mgr._server_ctx = resp["serverContext"]
-                    mgr._server_ctx["theftLoss"] = None
-            self.counters["single_locates"] = self.counters.get("single_locates", 0) + 1
+            self._request_locate(mgr, dev_id)
             after, waited = before, 0
             while waited < 36:
                 time.sleep(6)
@@ -237,6 +298,7 @@ class ICloudSource:
         me = " ".join(x for x in (info.get("firstName"), info.get("lastName")) if x) or "Me"
         raw_dump = []
         n = 0
+        new_owners: set[str] = set()
         for dev in mgr:
             d = dict(dev.data)
             raw_dump.append(d)
@@ -267,11 +329,30 @@ class ICloudSource:
                             meta={"isOld": loc.get("isOld"), "inaccurate": loc.get("isInaccurate")}):
                 self.counters["new_points"] += 1
                 self.alerter.check_fix(row, ts, lat, lon, acc)
+                if owner and any(k in (d.get("deviceClass") or "") for k in ("iPhone", "Watch", "iPad")):
+                    new_owners.add(owner)
         self.counters["devices"] = n
+        self._check_movement(new_owners)
         # Raw response kept for inspection (owner mapping, new fields). Local, 0600.
         p = DATA_DIR / "last_fmip.json"
         p.write_text(json.dumps({"userInfo": info, "content": raw_dump}, indent=1, default=str))
         p.chmod(0o600)
+
+    def _check_movement(self, owners: set[str]) -> None:
+        now = time.time()
+        win = max(self.cfg.follow_rest_minutes * 60, 35 * 60) + 60
+        for owner in owners:
+            seqs: dict[str, list] = {}
+            for r in db.q(
+                "SELECT p.device_id, p.ts, p.lat, p.lon, p.acc FROM points p JOIN devices d ON d.id=p.device_id "
+                "WHERE d.owner=? AND d.source='icloud' AND d.hidden=0 AND p.ts>=? "
+                "AND (d.device_class LIKE '%iPhone%' OR d.device_class LIKE '%Watch%' OR d.device_class LIKE '%iPad%') "
+                "ORDER BY p.ts", (owner, now - win)):
+                seqs.setdefault(r["device_id"], []).append((r["ts"], r["lat"], r["lon"], r["acc"]))
+            was = self.tracker.following(owner, now)
+            if self.tracker.on_fixes(owner, list(seqs.values()), now) and not was:
+                log.info("following %s while moving", owner)
+                self._wake.set()
 
     # ------------------------------------------------------------------ photos
     def photos_service(self):

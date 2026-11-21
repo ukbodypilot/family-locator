@@ -2,6 +2,25 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.2.0] -- 2026-11-21
+
+- **Per-person tracking.** Each person has their own fresh-location interval (Default, 2 min to 1
+  hour, or Never) on the Setup tab. Requests go to that person's main phone, staggered so the
+  family isn't woken at once.
+- **Follow while moving.** When someone's fixes show they've set off, more than 250 m and beyond
+  the fixes' combined accuracy, their phone is located every 2 minutes. It stops once they've
+  stayed put for 10 minutes, with a 4-hour safety cap. On or off per person. A pulsing badge shows
+  who's being followed.
+- **Follow now.** "Follow for 30 minutes" and "Stop following" in a person's menu.
+- **No more stalls.** Fresh locations no longer block the poller: requests return immediately and
+  answers are collected on 10-second reads.
+- **Settings fix.** On/off settings show as On and Off menus, and the settings are grouped in
+  order.
+- **One device at a time.** Movement is judged per device, so an iPad at home and a phone in a
+  pocket never look like a jump.
+- **`/metrics`** gains fresh-location and follow counters (people as `p0`, `p1`, …, never names).
+- **Docs:** a new [Tracking and following](docs/tracking.md) guide.
+
 ## [1.1.0] -- 2026-11-21
 
 - **Public transport base map** (ÖPNVKarte, from memomaps.de): bus, tram, metro and rail routes

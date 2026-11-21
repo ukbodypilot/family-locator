@@ -225,7 +225,7 @@ function buildPeople(list) {
   S.people = list.map((p) => {
     const devs = S.devices.filter((d) => d.owner === p.name && d.source !== "photos");
     const carried = devs.filter((d) => kindOf(d) in CARRY_RANK);
-    return { name: p.name, display: p.display || p.name, color: colors[p.name], devices: devs, carried: carried.length ? carried : devs.filter((d) => d.last) };
+    return { name: p.name, display: p.display || p.name, color: colors[p.name], tracking: p.tracking || {}, devices: devs, carried: carried.length ? carried : devs.filter((d) => d.last) };
   });
   S.personByName = Object.fromEntries(S.people.map((p) => [p.name, p]));
   S.items = S.devices.filter((d) => !d.owner && d.source !== "photos");
@@ -639,6 +639,12 @@ function devRow(d) {
   });
   return row;
 }
+function followBadge(p) {
+  const t = p.tracking || {};
+  if (!t.following || !S.follow) return "";
+  const why = t.following === "manual" ? "Following" : "Moving, following";
+  return `<span class="follow-badge" title="${t.following_until ? "Until " + esc(clock(t.following_until)) : ""}">${why}, every ${t.effective_minutes} min</span>`;
+}
 function renderPeople() {
   const el = $("#peopleList"); el.innerHTML = "";
   if (!S.devices.length) {
@@ -655,7 +661,7 @@ function renderPeople() {
         <div class="avatar" style="background:${p.color}">${esc(initials(p.display))}</div>
         <div class="person-name">${esc(p.display)}${p.display !== p.name ? ` <span class="muted small" title="Name in Apple's family data">${esc(p.name)}</span>` : ""}</div>
         <div class="person-side"><button class="dev-more person-more" aria-label="Actions for ${esc(p.display)}" aria-haspopup="menu" aria-expanded="false">⋯</button>${st.pos ? `<span>${esc(st.when)}</span>` : ""}${battHTML(dev)}</div>
-        <div class="person-status ${st.stale ? "stale" : ""}">${st.text}</div>
+        <div class="person-status ${st.stale ? "stale" : ""}">${st.text}${followBadge(p)}</div>
       </div>
       <div class="devs"><button class="devs-toggle" aria-expanded="${open}">${open ? "Hide" : "Show"} ${devs.length} device${devs.length === 1 ? "" : "s"}</button><div class="dev-list"></div></div>`;
     const list = $(".dev-list", box);
@@ -724,7 +730,45 @@ function personMenu(p, btn) {
     }],
     ["Change colour", () => pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); })],
     ["Insights", () => { const d = primaryOf(p) || p.carried[0]; if (d) openInsights(d.id); }],
+    p.tracking && p.tracking.following
+      ? ["Stop following", () => followPerson(p, 0)]
+      : ["Follow for 30 minutes", () => followPerson(p, 30)],
+    ["Tracking settings", () => { openTab("setup"); setTimeout(() => $("#peopleTracking").scrollIntoView({ block: "center" }), 120); }],
   ], p.display);
+}
+async function followPerson(p, minutes) {
+  try {
+    await api(`/api/people/${encodeURIComponent(p.name)}/follow`, { method: "POST", body: { minutes } });
+    toast(minutes ? `Following ${p.display}: a fresh location every ${S.cfgMoving || 2} min for ${minutes} min.` : `Stopped following ${p.display}.`, 5000);
+    await refreshAll();
+  } catch (e) { toast(e.message, 6000); }
+}
+async function loadTrackingTable() {
+  const rows = await api("/api/config");
+  const def = rows.find((r) => r.key === "locate_minutes")?.value ?? 15;
+  const followDef = !!rows.find((r) => r.key === "follow_moving")?.value;
+  S.cfgMoving = rows.find((r) => r.key === "moving_locate_minutes")?.value ?? 2;
+  const ivOpts = (cur) => [["", `Default (${def ? def + " min" : "never"})`], ["2", "2 min"], ["5", "5 min"], ["10", "10 min"], ["15", "15 min"], ["30", "30 min"], ["60", "1 hour"], ["0", "Never"]]
+    .map(([v, l]) => `<option value="${v}" ${String(cur ?? "") === v ? "selected" : ""}>${l}</option>`).join("");
+  const fOpts = (cur) => [["", `Default (${followDef ? "on" : "off"})`], ["1", "On"], ["0", "Off"]]
+    .map(([v, l]) => `<option value="${v}" ${(cur == null ? "" : cur ? "1" : "0") === v ? "selected" : ""}>${l}</option>`).join("");
+  const el = $("#peopleTracking");
+  el.innerHTML = `<span class="h">Person</span><span class="h">Fresh location</span><span class="h">Follow while moving</span>` +
+    S.people.map((p) => {
+      const t = p.tracking || {};
+      const st = t.following ? `<div class="st on">${t.following === "manual" ? "Following" : "Moving: following"} every ${t.effective_minutes} min${t.following_until ? ` until about ${esc(clock(t.following_until))}` : ""}</div>`
+        : t.next_locate ? `<div class="st">Next fresh location around ${esc(clock(t.next_locate))}</div>` : `<div class="st">No fresh locations requested</div>`;
+      return `<span>${esc(p.display)}</span>
+        <select data-p="${esc(p.name)}" data-k="locate_minutes" aria-label="Fresh location interval for ${esc(p.display)}">${ivOpts(t.locate_minutes)}</select>
+        <select data-p="${esc(p.name)}" data-k="follow" aria-label="Follow ${esc(p.display)} while moving">${fOpts(t.follow)}</select>${st}`;
+    }).join("");
+  el.onchange = async (e) => {
+    const sel = e.target.closest("select"); if (!sel) return;
+    const v = sel.value, body = {};
+    body[sel.dataset.k] = v === "" ? null : sel.dataset.k === "follow" ? v === "1" : Number(v);
+    try { await api(`/api/people/${encodeURIComponent(sel.dataset.p)}`, { method: "PATCH", body }); await loadDevices(); loadTrackingTable(); toast("Saved."); }
+    catch (err) { toast(err.message, 6000); }
+  };
 }
 function showMarkerFor(d, p) {
   L_temp.clearLayers();
@@ -755,7 +799,7 @@ function openTab(name) {
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.dataset.body !== name));
   $("#app").classList.remove("noside");
   if (name === "alerts") { loadEvents(); loadConfigForms(); }
-  if (name === "setup") { loadStatus(); loadConfigForms(); }
+  if (name === "setup") { loadStatus(); loadConfigForms(); loadTrackingTable(); }
   if (name === "insights") loadInsights();
   if (name !== "insights") L_stays.clearLayers();
   history.replaceState(null, "", "#" + name);
@@ -1005,11 +1049,15 @@ async function loadEvents() {
   $("#eventList").onclick = (ev2) => { const b = ev2.target.closest("[data-focus]"); if (b) { location.hash = "focus=" + b.dataset.focus; } };
 }
 const ALERT_KEYS = ["quiet_from_hour", "quiet_to_hour", "digest_hour", "low_battery_pct", "stale_hours", "geofence_exit_margin_m", "max_alert_accuracy_m"];
-const TRACK_KEYS = ["poll_seconds", "locate_minutes", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];
+const TRACK_KEYS = ["locate_minutes", "follow_moving", "moving_locate_minutes", "follow_rest_minutes", "follow_max_hours", "movement_threshold_m", "poll_seconds", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];
 async function loadConfigForms() {
   const rows = await api("/api/config");
-  const html = (keys, note) => rows.filter((r) => keys.includes(r.key)).map((r) => `<label class="cfg-row"><span>${esc(r.label)} <span class="u">${esc(r.unit)}</span></span>
-    <input type="number" name="${r.key}" min="${r.min}" max="${r.max}" step="any" value="${r.value}"></label>`).join("") +
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+  const field = (r) => (typeof r.value === "boolean" || (r.min === 0 && r.max === 1 && !r.unit))
+    ? `<select name="${r.key}"><option value="1" ${r.value ? "selected" : ""}>On</option><option value="0" ${r.value ? "" : "selected"}>Off</option></select>`
+    : `<input type="number" name="${r.key}" min="${r.min}" max="${r.max}" step="any" value="${Number(r.value)}">`;
+  const html = (keys, note) => keys.map((k) => byKey[k]).filter(Boolean).map((r) => `<label class="cfg-row"><span>${esc(r.label.replace(/ \(1 = on, 0 = off\)/, ""))}${r.unit ? ` <span class="u">${esc(r.unit)}</span>` : ""}</span>
+    ${field(r)}</label>`).join("") +
     `<div class="row gap end"><span class="muted small" style="margin-right:auto">${note}</span><button class="btn small primary">Save settings</button></div>`;
   $("#alertCfg").innerHTML = html(ALERT_KEYS, "Hours are 0 to 23, local time.");
   $("#trackCfg").innerHTML = html(TRACK_KEYS, "Fresh fixes wake family devices and use battery.");
@@ -1018,7 +1066,7 @@ for (const id of ["alertCfg", "trackCfg"]) $("#" + id).addEventListener("submit"
   e.preventDefault();
   busy(e.submitter, async () => {
     const body = Object.fromEntries([...new FormData(e.target)].map(([k, v]) => [k, Number(v)]));
-    await api("/api/config", { method: "PUT", body }); await loadConfigForms(); toast("Saved settings.");
+    await api("/api/config", { method: "PUT", body }); await loadConfigForms(); if (id === "trackCfg") loadTrackingTable(); toast("Saved settings.");
   });
 });
 $("#digestPreview").onclick = (e) => busy(e.target, async () => { const r = await api("/api/digest"); const b = $("#digestBox"); b.textContent = `${r.subject}\n\n${r.body}`; b.classList.remove("hidden"); });

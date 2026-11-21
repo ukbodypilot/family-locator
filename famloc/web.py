@@ -247,6 +247,12 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
             for k in ("polls", "poll_errors", "new_points"):
                 lines.append(f'famloc_{k}_total{{source="{src}"}} {st[k]}')
             lines.append(f'famloc_last_poll_timestamp{{source="{src}"}} {st["last_poll"]}')
+        lines.append(f'famloc_single_locates_total {icloud.counters.get("single_locates", 0)}')
+        lines.append(f"famloc_follows_started_total {icloud.tracker.follows_started}")
+        for i, (owner, n) in enumerate(sorted(icloud.tracker.sent_count.items())):
+            following = 1 if icloud.tracker.following(owner, time.time()) else 0
+            lines.append(f'famloc_person_locates_total{{person="p{i}"}} {n}')
+            lines.append(f'famloc_person_following{{person="p{i}"}} {following}')
         for k, v in ALERT_COUNTERS.items():
             lines.append(f"famloc_{k}_total {v}")
         n = db.q1("SELECT COUNT(*) AS n FROM points")["n"]
@@ -355,7 +361,8 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         out = []
         for i, o in enumerate(owners):
             out.append({"name": o, "display": names.get(o) or o,
-                        "color": colors.get(o) or PERSON_PALETTE[i % len(PERSON_PALETTE)]})
+                        "color": colors.get(o) or PERSON_PALETTE[i % len(PERSON_PALETTE)],
+                        "tracking": icloud.tracker.status(o, time.time())})
         return out
 
     @app.patch("/api/people/{name}")
@@ -364,6 +371,10 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         if body.get("color"):
             colors[name] = str(body["color"])
         db.set_setting("person_colors", colors)
+        if "locate_minutes" in body or "follow" in body:
+            icloud.tracker.set_person(name, locate_minutes=body.get("locate_minutes", "keep"),
+                                      follow=body.get("follow", "keep"))
+            icloud.poke()
         if "display" in body:
             names = db.get_setting("person_names", {})
             disp = str(body["display"] or "").strip()[:60]
@@ -373,6 +384,13 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
                 names.pop(name, None)  # blank = back to Apple's name
             db.set_setting("person_names", names)
         return {"ok": True}
+
+    @app.post("/api/people/{name}/follow")
+    def follow_person(name: str, body: dict = Body(default={})):
+        """Follow someone now for N minutes (0 stops following)."""
+        icloud.tracker.start_manual(name, float(body.get("minutes", 30)), time.time())
+        icloud.poke()
+        return icloud.tracker.status(name, time.time())
 
     @app.get("/api/digest")
     def digest_preview():

@@ -26,6 +26,10 @@ The **⋯** button on a person has:
   visible in small grey text beside the new one.
 - **Change colour.**
 - **Insights.**
+- **Follow for 30 minutes,** or **Stop following.** Gets a fresh location from their phone every 2
+  minutes, for example while they drive home. A pulsing "Following, every 2 min" appears under
+  their name.
+- **Tracking settings.** Jumps to their row in the tracking table on the Setup tab.
 
 The **⋯** button on a device (shown on hover) has:
 
@@ -152,7 +156,9 @@ changed on the Setup tab.
 
 - **iCloud Find My:** sign in or out, the status of polling, and **Locate everyone now**.
 - **Open on your phone:** the current outside link and the home link.
-- **Tracking:** how often to check and how often to ask devices for fresh fixes.
+- **Tracking:** a row per person, with **Fresh location** (Default, 2 min to 1 hour, or Never) and
+  **Follow while moving** (Default, On, Off), and when their next fresh location is due. Below it
+  are the global settings. See [Tracking and following](tracking.md).
 - **AirTags,** **Past locations from photos,** **Email** (with **Send a test email**) and the
   **Web password.**
 - At the bottom: how many fixes are stored and when the last backup ran.

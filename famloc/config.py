@@ -23,7 +23,12 @@ class Config:
 
     # iCloud Find My polling
     poll_seconds: int = 300  # read Apple's cached positions this often
-    locate_minutes: int = 15  # ask devices for a FRESH fix this often (0 = never; costs battery)
+    locate_minutes: int = 15  # default per-person fresh-fix interval (0 = never; costs battery)
+    follow_moving: bool = True        # locate a moving person more often until they stop
+    moving_locate_minutes: float = 2.0
+    follow_rest_minutes: float = 10.0  # "stopped" = no movement for this long
+    follow_max_hours: float = 4.0      # safety cap on one follow
+    movement_threshold_m: float = 250.0
     with_family: bool = True
 
     # AirTags (FindMy.py)
@@ -84,7 +89,12 @@ def load() -> Config:
 # DB (settings key "cfg_overrides") and applied on top of config.toml at startup and on save.
 EDITABLE = {
     "poll_seconds": ("Read cached positions every", 60, 3600, "s"),
-    "locate_minutes": ("Ask devices for a fresh fix every (0 = never)", 0, 1440, "min"),
+    "locate_minutes": ("Fresh fix for each person every (0 = never)", 0, 1440, "min"),
+    "follow_moving": ("Follow people while they move (1 = on, 0 = off)", 0, 1, ""),
+    "moving_locate_minutes": ("While moving, fresh fix every", 1, 15, "min"),
+    "follow_rest_minutes": ("Stop following after no movement for", 3, 60, "min"),
+    "follow_max_hours": ("Never follow one trip longer than", 0.5, 24, "h"),
+    "movement_threshold_m": ("Counts as moving beyond", 100, 2000, "m"),
     "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
     "low_battery_pct": ("Low battery alert below (0 = off)", 0, 100, "%"),
     "stale_hours": ("Stale device alert after (0 = off)", 0, 720, "h"),
@@ -107,8 +117,8 @@ def apply_overrides(cfg: Config, overrides: dict) -> dict:
         _, lo, hi, _ = EDITABLE[k]
         typ = type(getattr(cfg, k))
         v = typ(max(lo, min(hi, float(v))))
-        if k == "locate_minutes" and 0 < v < 5:
-            v = 5  # don't hammer family devices' batteries
+        if k == "locate_minutes" and 0 < v < 2:
+            v = 2  # don't hammer family devices' batteries
         setattr(cfg, k, v)
         clean[k] = v
     return clean

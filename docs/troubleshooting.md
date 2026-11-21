@@ -27,8 +27,9 @@ location** in a device's **⋯** menu shows the last fix this app saved, even fo
 
 - **Cached positions:** every 5 minutes the app reads the positions Apple already holds. These
   only change when a device reports in.
-- **Fresh fixes:** every 15 minutes it asks all devices for a fresh fix (**Ask devices for a fresh
-  fix every** on the Setup tab).
+- **Fresh fixes:** every 15 minutes it asks each person's phone for a fresh fix, every 2 minutes
+  while they're moving. Each person can have their own interval on the Setup tab. See
+  [Tracking and following](tracking.md).
 - **One person, right now:** use **Locate now** on a device, or **Locate everyone now** on the
   Setup tab.
 - **No answer:** a device that's asleep or out of signal won't respond.
