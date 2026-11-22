@@ -670,8 +670,9 @@ function render(full = false) {
   for (const G of groups) {
     if (G.members.length === 1) {
       const { p, st, lat, lon } = G.members[0];
+      const sp = avgSpeed(st.pos);
       const ic = L.divIcon({ className: "pmark" + (st.stale ? " stale" : ""), iconSize: [34, 34], iconAnchor: [17, 17],
-        html: `<div class="av" style="background:${p.color}">${esc(initials(p.display))}</div><div class="lbl">${esc(firstName(p.display))}</div>` });
+        html: `<div class="av" style="background:${p.color}">${esc(initials(p.display))}</div><div class="lbl">${esc(firstName(p.display))}${sp ? `<span class="spd">${Math.round(sp.kmh)} km/h · ${Math.round(sp.kmh / 1.609344)} mph</span>` : ""}</div>` });
       L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.display, keyboard: true }).bindPopup(() => personPopup(p), { autoPan: false }).on("click", centreOn).addTo(L_people);
     } else {
       if (G.place && G.members.some((m) => !m.st.place || m.st.place.id !== G.place.id)) G.place = null;
@@ -792,7 +793,7 @@ function renderPeople() {
     return;
   }
   for (const p of S.people) {
-    const st = personStatus(p), dev = st.pos ? st.pos.dev : p.carried[0];
+    const st = personStatus(p), dev = st.pos ? st.pos.dev : p.carried[0], sp = avgSpeed(st.pos);
     const pOn = personOn(p);
     const box = document.createElement("div"); box.className = "person" + (pOn ? "" : " mapoff");
     const devs = p.devices.filter(visible);
@@ -802,7 +803,7 @@ function renderPeople() {
         <div class="avatar" style="background:${p.color}">${esc(initials(p.display))}</div>
         <div class="person-name">${esc(p.display)}${p.display !== p.name ? ` <span class="muted small" title="Name in Apple's family data">${esc(p.name)}</span>` : ""}</div>
         <div class="person-side"><span class="side-btns">${eyeBtn(pOn, p.display)}<button class="dev-more person-more" aria-label="Actions for ${esc(p.display)}" aria-haspopup="menu" aria-expanded="false">⋯</button></span>${st.pos ? `<span>${esc(st.when)}</span>` : ""}${battHTML(dev)}</div>
-        <div class="person-status ${st.stale ? "stale" : ""}">${st.text}${followBadge(p)}</div>
+        <div class="person-status ${st.stale ? "stale" : ""}">${st.text}${sp ? ` <span class="speed" title="Average of the last ${sp.fixes} fixes over ${dur(sp.span / 60)}">· ${fmtSpeed(sp)}</span>` : ""}${followBadge(p)}</div>
       </div>
       <div class="devs"><button class="devs-toggle" aria-expanded="${open}">${open ? "Hide" : "Show"} ${devs.length} device${devs.length === 1 ? "" : "s"}</button><div class="dev-list"></div></div>`;
     const list = $(".dev-list", box);

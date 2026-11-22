@@ -107,6 +107,7 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .person-name { font-weight: 600; font-size: 16px; }
 .person-status { font-size: 14px; color: var(--ink-2); grid-column: 2; }
 .person-status.stale { color: var(--muted); }
+.person-status .speed { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .person-side { grid-row: span 2; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; color: var(--muted); }
 .batt { display: inline-flex; align-items: center; gap: 3px; }
 .batt.low { color: var(--alert); font-weight: 600; }
@@ -191,6 +192,7 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .pop .acts a { cursor: pointer; font-size: 13px; color: var(--water); }
 .pmark { position: relative; }
 .pmark .av { width: 34px; height: 34px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 6px rgba(0,0,0,.4); color: #fff; font-weight: 700; font-size: 13px; display: grid; place-items: center; }
+.pmark .lbl .spd { margin-left: 5px; font-weight: 500; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .pmark.stale .av { border-style: dashed; opacity: .8; }
 .pmark .lbl { position: absolute; top: 36px; left: 50%; translate: -50% 0; white-space: nowrap; font-size: 13px; font-weight: 600; padding: 0 6px; border-radius: 3px; background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
 .gmark { display: flex; align-items: center; gap: 0; padding: 3px 9px 3px 3px; border-radius: 99px; background: var(--panel); box-shadow: 0 1px 6px rgba(0,0,0,.35); white-space: nowrap; width: max-content; translate: -50% -50%; }
