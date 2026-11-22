@@ -536,7 +536,7 @@ function drawLanes() {
 $("#laneNames").addEventListener("click", (e) => {
   const el = e.target.closest("[data-p]"); if (!el) return;
   const p = S.personByName[el.dataset.p], pos = p && personPos(p);
-  if (pos) fly([pos.p[1], pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${ownerName(el.dataset.p)} at this time.`);
+  if (pos) fly([pos.p[1], pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${ownerName(el.dataset.p)} at ${clock(S.t)}.`);
 });
 $("#laneTrack").addEventListener("mousemove", (e) => {
   const tr = $("#laneTrack").getBoundingClientRect(), x = e.clientX - tr.left, y = e.clientY - tr.top;
@@ -548,6 +548,24 @@ $("#laneTrack").addEventListener("mousemove", (e) => {
   tip.style.left = Math.max(60, Math.min(tr.width - 60, x)) + "px"; tip.classList.remove("hidden");
 });
 $("#laneTrack").addEventListener("mouseleave", () => $("#laneTip").classList.add("hidden"));
+// Clicking (or releasing a drag) on a lane centres the map on that person at that moment, using the
+// device the marker uses then (the one actually with them).
+let laneGrab = null;
+$("#laneTrack").addEventListener("pointerdown", (e) => {
+  const tr = $("#laneTrack").getBoundingClientRect();
+  laneGrab = Math.floor((e.clientY - tr.top - LANE_TOP) / laneH());
+});
+// pointerup, not "change": clicking another lane at the same moment doesn't change the value
+$("#laneTrack").addEventListener("pointerup", () => setTimeout(centreOnLane, 0));
+function centreOnLane() {
+  const R = laneGrab != null ? S.runs[laneGrab] : null;
+  laneGrab = null;
+  if (!R) return;
+  const p = S.personByName[R.person], pos = p && personPos(p, S.t);
+  if (!pos) return toast(`No location for ${p ? p.display : R.person} at ${clock(S.t)}.`);
+  const ll = [pos.p[1], pos.p[2]];
+  if (map.getZoom() < 12) fly(ll, 15); else if (reduceMotion) map.panTo(ll, { animate: false }); else map.panTo(ll);
+}
 addEventListener("resize", () => drawLanes());
 
 /* ---------------- render ---------------- */
