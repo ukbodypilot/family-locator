@@ -24,12 +24,27 @@ minutes. What we measured on 2026-11-21:
   reports from the phones themselves.
 
 So the app reads every 60 seconds (`poll_seconds`), starts a fresh session every 5 minutes
-(`session_renew_minutes`), every 3 minutes while any family member is moving
+(`session_renew_minutes`), every 2 minutes while any family member is moving
 (`session_renew_moving_minutes`, never under 2), every 10 minutes once the whole family has been
 at rest for 30 minutes (`session_renew_quiet_minutes`, `quiet_after_minutes`), typically overnight, and a watchdog starts one early if family fixes stop for 10 minutes while
 their devices are online. **For family members, the session interval is what sets freshness.**
 Following them faster can't help. Family fresh-location requests are kept to a probe (2 an hour) in
 case Apple's behaviour changes.
+
+Measured on 2026-11-21 (family fix age, median / 90th percentile / worst, in minutes):
+
+| Session every | Median | p90 | Worst | Sessions/h |
+|---|---|---|---|---|
+| 10 min | 3.4 | 9.8 | 19.9 | 6 |
+| 5 min | 2.0 | 5.2 | 13.2 | 12 |
+| 3 min | 0.9 | 2.0 | 4.0 | 19 |
+| 2 min | 0.5 | 1.3 | 2.4 | 27 |
+
+Apple sent no errors, login challenges or session changes at any interval. The defaults (5 normal,
+2 while moving, 10 when quiet) keep 2-minute sessions to the times someone is travelling.
+
+After a locate request the app reads every 15 s until Apple's own locate deadline
+(`maxLocatingTime`, 90 s) plus 10 s. Your own phone's answers arrive in 4-8 s while it moves.
 
 ## Per-person intervals
 
@@ -102,7 +117,9 @@ family, not person by person:
   budget and aren't paused.
 - **Restarts don't reset it:** request history and any pause are saved in the database.
 - **Per-person backoff too:** a person whose phone doesn't produce a new fix after 3 requests in a
-  row has their interval doubled, up to once an hour, until it answers again.
+  row has their interval doubled, up to once an hour, until it answers again. For your own devices,
+a request Apple acted on (`isLocating: true`) that returns the stored fix means the device hasn't
+moved. It doesn't count: only requests Apple ignores back off.
 
 The Setup tab shows how much of the budget has been used this hour, or the pause and its reason.
 After a restart, the first requests wait 2 minutes and are spread 30 seconds apart.

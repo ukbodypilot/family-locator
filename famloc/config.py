@@ -35,8 +35,8 @@ class Config:
     family_pause_cap_minutes: float = 120.0
     locate_spacing_s: float = 20.0         # minimum gap between any two locate requests
     unanswered_backoff_after: int = 3      # per person: unanswered requests in a row before slowing them
-    session_renew_minutes: float = 10.0    # start a fresh Find My web session this often (Apple's sessionLifespan is 15 min); 0 = never
-    session_renew_moving_minutes: float = 3.0  # ...this often while any family member is moving (floor 2)
+    session_renew_minutes: float = 5.0     # start a fresh Find My web session this often (Apple's sessionLifespan is 15 min); 0 = never
+    session_renew_moving_minutes: float = 2.0  # ...this often while any family member is moving (floor 2)
     session_renew_quiet_minutes: float = 10.0  # ...this often once every family member has been at rest for quiet_after_minutes
     quiet_after_minutes: float = 30.0
     with_family: bool = True

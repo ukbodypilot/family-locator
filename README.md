@@ -23,7 +23,8 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
 - **Follows people while they move.** Each person has their own fresh-location interval. When
   someone sets off, the device that's actually moving is located every 2 minutes until it stops.
 - **Keeps family positions fresh.** Family members' positions refresh when a new Find My session
-  starts, so the app renews its session every 10 minutes and reads every minute, within Apple's
+  starts, so the app renews its session every 5 minutes (every 2 while someone travels, 10 when everyone is
+  at rest) and reads every minute, within Apple's
   own limits. It never hammers.
 - **Daily summary email.** Every evening: who went where, how far, and a link per person.
 - **Works on a phone, from anywhere,** through the radio gateway's Cloudflare tunnel. Email links

@@ -6,7 +6,7 @@ port = 8790
 
 [tracking]
 poll_seconds = 60         # (UI) read the positions Apple already has, this often
-session_renew_minutes = 10  # (UI) fresh Find My session this often; family positions refresh per session
+session_renew_minutes = 5   # (UI) fresh Find My session this often; family positions refresh per session
 locate_minutes = 15       # (UI) default fresh-location interval per person; 0 = never, minimum 1
 airtag_poll_minutes = 15  # (UI)
 

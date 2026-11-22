@@ -38,8 +38,8 @@ inside any `[section]`; sections are only for readability.
 | `family_pause_cap_minutes` | 120 | yes | Longest family pause. |
 | `locate_spacing_s` | 20 | yes | Minimum gap between any two locate requests. |
 | `unanswered_backoff_after` | 3 | yes | Unanswered requests in a row before a person's interval is doubled. |
-| `session_renew_minutes` | 10 | yes | Start a fresh Find My session this often (0 = never). Family members' positions refresh at each new session; Apple's session lifespan is 15 minutes. |
-| `session_renew_moving_minutes` | 3 | yes | Session interval while any family member is moving (floor 2). Each new session makes Apple locate every family device, so this is how family members get followed. |
+| `session_renew_minutes` | 5 | yes | Start a fresh Find My session this often (0 = never). Family members' positions refresh at each new session; Apple's session lifespan is 15 minutes. |
+| `session_renew_moving_minutes` | 2 | yes | Session interval while any family member is moving (floor 2). Each new session makes Apple locate every family device, so this is how family members get followed. |
 | `session_renew_quiet_minutes` | 10 | yes | Session interval once every family member has been at rest for `quiet_after_minutes` (quiet mode). |
 | `quiet_after_minutes` | 30 | yes | How long everyone must be at rest before quiet mode. |
 | `with_family` | true | | Include Family Sharing members' devices. |

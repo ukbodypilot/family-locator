@@ -2,6 +2,27 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.6.0] -- 2026-11-21
+
+Family positions about a minute old instead of several, and your own phone answers in seconds.
+
+- **Session timing from a day of measurement.** A fresh Find My session every 5 minutes (was 10),
+  every 2 while any family member is moving, and every 10 in **quiet mode**, once the whole family
+  has been at rest for 30 minutes. Measured family fix age: 2.0 min median at 5-min sessions,
+  0.5 at 2-min, against 3.4 at 10-min. Apple pushed back at no interval (table in
+  `docs/tracking.md`). New settings: `session_renew_moving_minutes`, `session_renew_quiet_minutes`,
+  `quiet_after_minutes`.
+- **Faster answers.** After a locate request the app reads fast until Apple's own locate deadline
+  (90 s + 10 s, was 50 s), so a late answer no longer waits a whole cycle. Your own phone now
+  answers in 4-8 s while moving (was about 2 min).
+- **No backoff for your own phone at rest.** A request Apple acted on that returns the stored fix
+  means "hasn't moved", not "no answer". Only requests Apple ignores slow the interval down.
+- **Answer detection:** a fix from before a request isn't counted as its answer. Session fixes
+  were being miscounted.
+- **Page refresh** every 30 s while visible, and immediately on returning to the tab (was 60 s,
+  and stale after backgrounding).
+- **`/metrics`:** `famloc_session_mode` (schedule, moving or quiet).
+
 ## [1.5.0] -- 2026-11-21
 
 Fresh family positions, and the map follows the device that's actually with each person.
