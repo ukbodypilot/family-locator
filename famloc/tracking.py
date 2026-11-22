@@ -121,7 +121,7 @@ class Tracker:
         Fixes with no request pending are logged as 'fix' (the phone reported by itself)."""
         with self.lock:
             t = self.pending.get(owner)
-            if t is not None and t - 30 <= fix_ts <= t + self.ANSWER_WINDOW_S:
+            if t is not None and t - 5 <= fix_ts <= t + self.ANSWER_WINDOW_S:   # a fix from before the request isn't its answer
                 self.pending.pop(owner, None)
                 self.answered[owner] = self.answered.get(owner, 0) + 1
                 was = self.streak.get(owner, 0)
