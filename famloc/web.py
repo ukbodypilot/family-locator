@@ -269,6 +269,7 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         lines.append(f'famloc_single_locates_total {icloud.counters.get("single_locates", 0)}')
         lines.append(f'famloc_session_reinits_total {icloud.counters.get("reinits", 0)}')
         lines.append(f'famloc_sessions_started_total {icloud.counters.get("sessions", 0)}')
+        lines.append(f'famloc_session_mode{{mode="{getattr(icloud, "session_mode", "schedule").split(":")[0]}"}} 1')
         lines.append(f"famloc_follows_started_total {icloud.tracker.follows_started}")
         fs = icloud.tracker.family_status(time.time())
         lines.append(f"famloc_family_locates_last_hour {fs['used_last_hour']}")

@@ -441,6 +441,49 @@ def test_sessions_renew_faster_while_family_moves():
     assert any("moving: Kid" in r["data"] for r in ev)
 
 
+def test_quiet_mode_slows_sessions_when_everyone_rests():
+    import threading
+    from famloc import icloud_source
+    from famloc.icloud_source import ICloudSource
+    class M:
+        def __init__(self):
+            self._server_ctx = None; self.inits = []; self.t = 0
+            self.user_info = {"firstName": "Me", "lastName": "", "membersInfo": {}}
+            self._refresh_lock = threading.Lock()
+        def __iter__(self): return iter([])
+        def refresh(self, locate=False):
+            if self._server_ctx is None: self.inits.append(self.t)
+            self._server_ctx = {"sessionLifespan": 900000}
+    c2 = config.Config(email_enabled=False, poll_seconds=60, session_renew_minutes=5, session_renew_quiet_minutes=10, quiet_after_minutes=30)
+    src = ICloudSource(c2, Alerter(c2)); m = M()
+    class Api: devices = m
+    src.api = Api(); src.state = "ok"
+    db.upsert_device("icloud:quiet-kid", "icloud", "Kid phone", owner="QuietKid", device_class="iPhone")
+    db.x("UPDATE devices SET hidden=1 WHERE id != 'icloud:quiet-kid'")   # only this family member counts
+    real = icloud_source.time.time; clock = {"t": 5_000_000.0}
+    icloud_source.time.time = lambda: clock["t"]
+    try:
+        def run(minutes, moving=False):
+            for _ in range(int(minutes * 60 / 15)):
+                clock["t"] += 15; m.t = round((clock["t"] - 5_000_000) / 60, 2)
+                if int(clock["t"]) % 120 < 15:   # a fix every 2 min: still, or drifting 500 m per fix
+                    k = (clock["t"] - 5_000_000) / 120
+                    db.add_point("icloud:quiet-kid", clock["t"], 40.0 + (0.0045 * k if moving else 0), -100.0, acc=10)
+                src.tick(clock["t"])
+        run(20, moving=True)                     # travelling: not quiet
+        busy = len(m.inits)
+        run(60)                                  # resting: after 30 min quiet kicks in
+    finally:
+        icloud_source.time.time = real
+        db.x("UPDATE devices SET hidden=0")
+    gap = lambda xs: [round(b - a, 1) for a, b in zip(xs, xs[1:])]
+    late = [t for t in m.inits if t > 20 + 32]
+    assert src.session_mode == "quiet", src.session_mode
+    assert all(g >= 9.9 for g in gap(late)), gap(m.inits)
+    early = [t for t in m.inits if t <= 20]
+    assert all(g <= 5.5 for g in gap(early)), gap(early)
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

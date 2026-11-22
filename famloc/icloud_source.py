@@ -318,9 +318,16 @@ class ICloudSource:
             return
         # Each new session makes Apple locate every family device, so while a family member is
         # travelling, renew faster (their own locate requests are ignored; this is the only lever).
-        movers = [o for o in self._owners() if not self.tracker.is_self(o) and self.tracker.following(o, now) == "moving"]
+        family = [o for o in self._owners() if not self.tracker.is_self(o)]
+        movers = [o for o in family if self.tracker.following(o, now) == "moving"]
+        mode = "schedule"
         if movers:
             mins = min(mins, max(2.0, float(self.cfg.session_renew_moving_minutes)))
+            mode = "moving: " + ", ".join(movers)
+        elif family and all(self._at_rest_for(o, now, self.cfg.quiet_after_minutes) for o in family):
+            mins = max(mins, float(self.cfg.session_renew_quiet_minutes))
+            mode = "quiet"
+        self.session_mode = mode
         if not self._session_started:
             self._session_started = now  # session predates this code path (e.g. first access at startup)
             return
@@ -328,9 +335,24 @@ class ICloudSource:
         mins = max(1.0, min(mins, lifespan_min - 1))
         if now - self._session_started >= mins * 60:
             db.log_locate_event("session_renew", None, now, age_s=round(now - self._session_started),
-                                lifespan_min=lifespan_min, interval_min=mins,
-                                reason=("moving: " + ", ".join(movers)) if movers else "schedule")
+                                lifespan_min=lifespan_min, interval_min=mins, reason=mode)
             mgr._server_ctx = None
+
+    session_mode = "schedule"
+
+    def _at_rest_for(self, owner: str, now: float, minutes: float) -> bool:
+        """Quiet = this person's phone/Watch/iPad fixes over the last `minutes` all sit within the stay
+        radius of their latest fix, and really cover that span. Unknown (too few fixes) = not quiet."""
+        rows = db.q("SELECT p.ts, p.lat, p.lon, p.acc FROM points p JOIN devices d ON d.id=p.device_id "
+                    "WHERE d.owner=? AND d.source='icloud' AND d.hidden=0 AND p.ts>=? AND "
+                    "(d.device_class LIKE '%iPhone%' OR d.device_class LIKE '%Watch%' OR d.device_class LIKE '%iPad%') "
+                    "ORDER BY p.ts", (owner, now - minutes * 60 - 300))
+        if len(rows) < 3 or rows[-1]["ts"] - rows[0]["ts"] < minutes * 60 * 0.8:
+            return False
+        from .tracking import _dist_m
+        la, lo = rows[-1]["lat"], rows[-1]["lon"]
+        lim = max(self.cfg.stay_radius_m, 150.0)
+        return all(_dist_m(r["lat"], r["lon"], la, lo) <= lim + (r["acc"] or 0) for r in rows)
 
     def _family_watchdog(self, mgr, now: float) -> None:
         """Our view of family devices froze 15:40-16:03 on 2026-11-21 and a restart (fresh initClient)

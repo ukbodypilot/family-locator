@@ -37,6 +37,8 @@ class Config:
     unanswered_backoff_after: int = 3      # per person: unanswered requests in a row before slowing them
     session_renew_minutes: float = 10.0    # start a fresh Find My web session this often (Apple's sessionLifespan is 15 min); 0 = never
     session_renew_moving_minutes: float = 3.0  # ...this often while any family member is moving (floor 2)
+    session_renew_quiet_minutes: float = 10.0  # ...this often once every family member has been at rest for quiet_after_minutes
+    quiet_after_minutes: float = 30.0
     with_family: bool = True
 
     # AirTags (FindMy.py)
@@ -111,6 +113,8 @@ EDITABLE = {
     "unanswered_backoff_after": ("Slow a person down after this many unanswered requests", 1, 20, ""),
     "session_renew_minutes": ("Renew the Find My session every (0 = never)", 0, 60, "min"),
     "session_renew_moving_minutes": ("...while a family member is moving, every", 2, 15, "min"),
+    "session_renew_quiet_minutes": ("...when the whole family has been at rest a while, every", 2, 15, "min"),
+    "quiet_after_minutes": ("Counts as quiet after everyone has been at rest for", 10, 240, "min"),
     "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
     "low_battery_pct": ("Low battery alert below (0 = off)", 0, 100, "%"),
     "stale_hours": ("Stale device alert after (0 = off)", 0, 720, "h"),
