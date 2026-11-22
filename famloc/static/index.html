@@ -245,15 +245,16 @@
       <button class="icon-btn play" id="playBtn" title="Play" aria-label="Play">
         <svg viewBox="0 0 24 24" id="playIco"><path d="M8 5l11 7-11 7z"/></svg>
       </button>
-      <select id="speed" title="Playback speed" aria-label="Playback speed">
-        <option value="60">1 min a second</option><option value="600">10 min a second</option>
-        <option value="3600" selected>1 hour a second</option><option value="21600">6 hours a second</option>
-        <option value="86400">1 day a second</option><option value="604800">1 week a second</option>
-      </select>
-      <select id="trail" title="How much track to show behind the time" aria-label="Trail length">
-        <option value="0">Whole track</option><option value="3600">Last hour</option>
-        <option value="21600">Last 6 hours</option><option value="86400">Last day</option>
-      </select>
+      <label class="tb-slider" title="Playback speed: how much time passes per second">
+        <span class="tb-slider-name">Speed</span>
+        <input type="range" id="speed" min="0" max="9" step="1" value="4" aria-label="Playback speed">
+        <output id="speedOut" for="speed"></output>
+      </label>
+      <label class="tb-slider" title="How much track to show behind the current time">
+        <span class="tb-slider-name">Trail</span>
+        <input type="range" id="trail" min="0" max="8" step="1" value="8" aria-label="Trail length">
+        <output id="trailOut" for="trail"></output>
+      </label>
     </div>
     <div class="lanes" id="lanes">
       <div class="lane-names" id="laneNames"></div>

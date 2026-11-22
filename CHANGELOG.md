@@ -4,6 +4,10 @@ All notable changes to Family Locator. The version is the git tag.
 
 ## [Unreleased]
 
+- **Timeline:** playback speed and trail length are sliders, not drop-downs, with more stops
+  (speed 1 min to 1 week per second; trail 15 min to 7 days, or whole track), remembered per
+  browser and shown on phones too. Lanes are taller (28 px, 20 px on phones) with more room
+  around them.
 - **Show or hide people and devices on the map.** An eye button on each person and device, **Show
   only (name)** in a person's menu, and a **Show all** bar while anything is hidden. Hiding a
   device takes it out of the person's position, e.g. an iPad left at home. Saved per browser;

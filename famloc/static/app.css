@@ -214,7 +214,7 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .picking #map { cursor: crosshair; }
 
 /* ---------- timeline ---------- */
-.timebar { grid-area: time; background: var(--panel); border-top: 1px solid var(--rule); padding: 6px 10px 6px; display: flex; flex-direction: column; gap: 4px; z-index: 1000; }
+.timebar { grid-area: time; background: var(--panel); border-top: 1px solid var(--rule); padding: 8px 14px 8px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; }
 .tb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tb-spacer { flex: 1; }
 .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
@@ -227,11 +227,20 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .play { background: var(--ink); color: var(--paper); border-radius: 50%; width: 32px; height: 32px; }
 .play:hover { background: var(--ink-2); color: var(--paper); }
 .play svg { fill: currentColor; stroke: none; width: 16px; height: 16px; }
-#speed, #trail { font-size: 13px; padding: 3px 6px; }
-.lanes { display: grid; grid-template-columns: 92px 1fr; align-items: stretch; }
-.lane-names { display: flex; flex-direction: column; padding-top: 14px; }
-.lane-names div { height: 16px; line-height: 16px; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 5px; padding-right: 6px; cursor: pointer; }
-.lane-names div i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* speed / trail sliders */
+label.tb-slider { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.tb-slider output { min-width: 5.6em; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tb-slider input { width: 120px; height: 20px; margin: 0; background: transparent; appearance: none; -webkit-appearance: none; cursor: pointer; --fill: 50%; }
+.tb-slider input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--ink) var(--fill), var(--rule) var(--fill)); }
+.tb-slider input::-moz-range-track { height: 4px; border-radius: 2px; background: var(--rule); }
+.tb-slider input::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--ink); }
+.tb-slider input::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: var(--panel); border: 2px solid var(--ink); }
+.tb-slider input::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--panel); border: 2px solid var(--ink); }
+.tb-slider input:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 4px; }
+.lanes { display: grid; grid-template-columns: 110px 1fr; align-items: stretch; }
+.lane-names { display: flex; flex-direction: column; padding-top: 20px; }
+.lane-names div { height: 28px; line-height: 28px; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 5px; padding-right: 6px; cursor: pointer; }
+.lane-names div i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .lane-names div:hover { text-decoration: underline; }
 .lane-track { position: relative; min-width: 0; }
 .lane-track canvas { display: block; width: 100%; }
@@ -243,7 +252,7 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .lane-track input:focus-visible { outline-offset: 0; }
 .lane-tip { position: absolute; bottom: calc(100% + 6px); z-index: 5; background: var(--ink); color: var(--paper); font-size: 13px; padding: 4px 9px; border-radius: 4px; white-space: nowrap; pointer-events: none; translate: -50% 0; }
 .lane-tip .place-name { color: inherit; }
-.lane-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding-left: 92px; }
+.lane-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding-left: 110px; }
 .lane-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .lane-legend i { width: 14px; height: 8px; border-radius: 2px; }
 
@@ -260,11 +269,15 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
   .search { min-width: 0; }
   .tb-row { gap: 6px; }
   .seg button { padding: 3px 7px; }
-  #speed, #trail, #tPrev, #tNext { display: none; }
-  .lanes { grid-template-columns: 30px 1fr; }
+  #tPrev, #tNext { display: none; }
+  .tb-slider { flex: 1 1 140px; gap: 6px; }
+  .tb-slider input { flex: 1; width: auto; min-width: 60px; }
+  .tb-slider output { min-width: 4.8em; }
+  .tb-slider-name { min-width: 3.2em; }
+  .lanes { grid-template-columns: 34px 1fr; }
   .lane-names div span { display: none; }
-  .lane-names div { height: 12px; }
-  .lane-legend { padding-left: 30px; }
+  .lane-names div { height: 20px; }
+  .lane-legend { padding-left: 34px; }
   .view-banner { top: 8px; font-size: 13px; }
 }
 #map.far .place-label { display: none; }

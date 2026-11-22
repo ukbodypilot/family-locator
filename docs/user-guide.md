@@ -118,8 +118,9 @@ Your choices are remembered in this browser.
 - **Viewing the past.** Drag the timeline to any moment. The map, people list and status lines
   all show that moment, and a banner reads "Viewing Thu 19 Nov 11:15" with **Back to now**. While
   you're viewing the past, the automatic refresh leaves you where you are.
-- **Playback.** Press play to animate, at speeds from 1 minute to 1 week per second.
-  **Whole track** can be cut to the last hour, 6 hours or day behind the cursor.
+- **Playback.** Press play to animate. The **Speed** slider sets how much time passes per second,
+  from 1 minute to 1 week. The **Trail** slider sets how much track shows behind the cursor, from
+  15 minutes to 7 days, or the whole track at the far right. Both are remembered in your browser.
 
 ## Search
 

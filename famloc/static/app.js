@@ -418,7 +418,7 @@ $("#playBtn").onclick = () => {
 function tick(ts) {
   if (!S.playing) return;
   const dtS = (ts - lastFrame) / 1000; lastFrame = ts;
-  S.t = Math.min(S.end, S.t + dtS * Number($("#speed").value));
+  S.t = Math.min(S.end, S.t + dtS * speedSec());
   render();
   if (S.t >= S.end) { stopPlay(); render(); return; }
   requestAnimationFrame(tick);
@@ -449,8 +449,8 @@ function fitAll() {
 }
 
 /* ---------------- timeline lanes ---------------- */
-function laneH() { return isPhone() ? 12 : 16; }
-const LANE_TOP = 14;
+function laneH() { return isPhone() ? 20 : 28; }
+const LANE_TOP = 20;
 /* A person's path as the marker sees it: every carried-device fix that would have been the marker
    position at its own moment (phone by default; Watch/iPad only when clearly fresher). This makes
    the lanes follow whichever device is actually with the person, e.g. a Watch when the phone stayed home. */
@@ -519,7 +519,7 @@ function drawLanes() {
   const steps = [H, 3 * H, 6 * H, 12 * H, D, 2 * D, 7 * D, 14 * D, 30 * D, 91 * D, 365 * D];
   const step = steps.find((st) => (st / span) * w >= 70) || 365 * D;
   const tz = new Date().getTimezoneOffset() * 60;
-  g.font = `12px ${css.getPropertyValue("--ui")}`; g.textBaseline = "top";
+  g.font = `13px ${css.getPropertyValue("--ui")}`; g.textBaseline = "top";
   for (let t = Math.ceil((S.start - tz) / step) * step + tz; t < S.end; t += step) {
     const x = X(t); g.fillStyle = css.getPropertyValue("--rule"); g.fillRect(x, LANE_TOP - 2, 1, h - LANE_TOP + 2);
     g.fillStyle = css.getPropertyValue("--muted");
@@ -529,7 +529,7 @@ function drawLanes() {
   // lanes
   const elseCol = css.getPropertyValue("--muted");
   S.runs.forEach((R, i) => {
-    const y = LANE_TOP + i * lh + 2, bh = lh - 5, person = S.personByName[R.person];
+    const y = LANE_TOP + i * lh + 4, bh = lh - 9, person = S.personByName[R.person];
     g.fillStyle = css.getPropertyValue("--rule-2"); g.fillRect(0, y + bh / 2 - 0.5, w, 1);
     for (const r of R.runs) {
       const x0 = X(Math.max(r.t0, S.start)), x1 = Math.max(x0 + 1.5, X(Math.min(r.t1, S.end)));
@@ -593,7 +593,7 @@ function render(full = false) {
   scrub.value = Math.round(((S.t - S.start) / span) * 1000);
   scrub.setAttribute("aria-valuetext", dt(S.t));
   updateBanner();
-  const trail = Number($("#trail").value), from = trail ? Math.max(S.start, S.t - trail) : S.start;
+  const trail = trailSec(), from = trail ? Math.max(S.start, S.t - trail) : S.start;
   L_tracks.clearLayers(); L_people.clearLayers(); L_acc.clearLayers(); L_points.clearLayers(); L_devices.clearLayers();
   const heat = [], wantDots = map.hasLayer(L_points), wantHeat = map.hasLayer(L_heat), wantDevs = map.hasLayer(L_devices);
 
@@ -1246,7 +1246,24 @@ async function refreshAll() {
   S.lastRefresh = now();
   await loadPoints();
 }
-$("#trail").onchange = () => render();
+/* playback speed and trail: sliders over fixed stops (seconds); the last trail stop = whole track */
+const SPEEDS = [[60, "1 min/s"], [300, "5 min/s"], [600, "10 min/s"], [1800, "30 min/s"], [3600, "1 h/s"], [10800, "3 h/s"],
+  [21600, "6 h/s"], [43200, "12 h/s"], [86400, "1 day/s"], [604800, "1 week/s"]];
+const TRAILS = [[900, "15 min"], [3600, "1 hour"], [3 * 3600, "3 hours"], [6 * 3600, "6 hours"], [12 * 3600, "12 hours"],
+  [86400, "1 day"], [3 * 86400, "3 days"], [7 * 86400, "7 days"], [0, "Whole track"]];
+const stop = (arr, el) => arr[Math.max(0, Math.min(arr.length - 1, Number(el.value)))];
+function speedSec() { return stop(SPEEDS, $("#speed"))[0]; }
+function trailSec() { return stop(TRAILS, $("#trail"))[0]; }
+function syncSliders() {
+  for (const [id, arr] of [["speed", SPEEDS], ["trail", TRAILS]]) {
+    const el = $("#" + id), [, label] = stop(arr, el);
+    $("#" + id + "Out").textContent = label; el.setAttribute("aria-valuetext", label);
+    el.style.setProperty("--fill", (Number(el.value) / Number(el.max)) * 100 + "%");
+  }
+}
+$("#speed").value = store.get("speedStop", 4); $("#trail").value = store.get("trailStop", 8); syncSliders();
+$("#speed").oninput = () => { store.set("speedStop", Number($("#speed").value)); syncSliders(); };
+$("#trail").oninput = () => { store.set("trailStop", Number($("#trail").value)); syncSliders(); schedRender(); };
 
 function handleHash() {
   const h = decodeURIComponent(location.hash.slice(1));
