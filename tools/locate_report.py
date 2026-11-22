@@ -75,7 +75,7 @@ def main() -> None:
     print("  req = requests sent; locTrue/locFalse = Apple's isLocating on the reply; answered = new fix")
     print("  within 3 min of a request; selfFix = new fix with no request pending (phone reported by itself)\n")
 
-    gov = [(ts, ev, p, d) for ts, ev, p, d in rows if ev in ("pause", "resume", "blocked", "unblocked", "backoff", "follow_start", "follow_stop", "settings")]
+    gov = [(ts, ev, p, d) for ts, ev, p, d in rows if ev in ("pause", "resume", "blocked", "unblocked", "backoff", "follow_start", "follow_stop", "settings", "reinit", "ctx_change")]
     if gov:
         print("Governor and follow decisions")
         for ts, ev, p, d in gov:

@@ -225,6 +225,7 @@ class ICloudSource:
                     mgr.refresh(locate=False)
                     self._ingest(mgr)
                     self.last_read = now
+                    self._family_watchdog(mgr, now)
                     self.last_ok = time.time()
                     if self.state_detail.startswith("poll error"):
                         self.state_detail = "polling"
@@ -248,6 +249,7 @@ class ICloudSource:
                                  "timezone": _FMIP_CLIENT_CONTEXT_TIMEZONE, "inactiveTime": 0,
                                  "shouldLocate": True, "selectedDevice": target.data["id"]},
                "serverContext": mgr._server_ctx}
+        ctx_before = dict(mgr._server_ctx or {})
         with mgr._refresh_lock:
             r = mgr.session.post(mgr._fmip_refresh_url, params=mgr.params, json=req, timeout=20)
             try:
@@ -257,6 +259,7 @@ class ICloudSource:
             if resp.get("serverContext"):
                 mgr._server_ctx = resp["serverContext"]
                 mgr._server_ctx["theftLoss"] = None
+        self._log_ctx_change(ctx_before, dict(mgr._server_ctx or {}), owner)
         mine = next((c for c in resp.get("content") or [] if c.get("id") == target.data["id"]), {})
         loc = mine.get("location") or {}
         info = {"t": time.time(), "owner": owner, "http": getattr(r, "status_code", None),
@@ -274,6 +277,53 @@ class ICloudSource:
                                            info["fix_age_s"], info["devices_in_reply"])
         self.counters["single_locates"] = self.counters.get("single_locates", 0) + 1
         return info
+
+    @staticmethod
+    def _ctx_summary(ctx: dict) -> dict:
+        """serverContext with ID-like values masked, for diagnosis."""
+        out = {}
+        for k, v in sorted(ctx.items()):
+            if isinstance(v, (int, float, bool)) or v is None:
+                out[k] = v
+            elif isinstance(v, str):
+                out[k] = v if len(v) <= 12 else f"<str len={len(v)}>"
+            elif isinstance(v, (list, dict)):
+                out[k] = f"<{type(v).__name__} len={len(v)}>"
+            else:
+                out[k] = f"<{type(v).__name__}>"
+        return out
+
+    def _log_ctx_change(self, before: dict, after: dict, owner: str | None) -> None:
+        b, a = self._ctx_summary(before), self._ctx_summary(after)
+        diff = {k: [b.get(k), a.get(k)] for k in set(a) | set(b) if b.get(k) != a.get(k) and "Time" not in k}
+        if diff:
+            db.log_locate_event("ctx_change", owner, after_locate=True, diff=diff)
+
+    def _family_watchdog(self, mgr, now: float) -> None:
+        """Our view of family devices froze 15:40-16:03 on 2026-11-21 and a restart (fresh initClient)
+        cleared it instantly. If family fixes stop for 10 min while their devices are online and were
+        reporting before, reset the session state (next read is a fresh initClient) and log it."""
+        if now - getattr(self, "_last_reinit", 0) < 600:
+            return
+        me = self.tracker.self_owner
+        if not me:
+            return
+        recent = db.q1("SELECT MAX(p.ts) AS t FROM points p JOIN devices d ON d.id=p.device_id "
+                       "WHERE d.source='icloud' AND d.owner IS NOT NULL AND d.owner!=?", (me,))
+        before = db.q1("SELECT COUNT(*) AS n FROM points p JOIN devices d ON d.id=p.device_id "
+                       "WHERE d.source='icloud' AND d.owner IS NOT NULL AND d.owner!=? AND p.ts BETWEEN ? AND ?",
+                       (me, now - 2400, now - 600))
+        online = sum(1 for dv in mgr if dict(dv.data).get("prsId") and dict(dv.data).get("deviceStatus") == "200"
+                     and (dict(dv.data).get("location") or {}).get("timeStamp"))
+        last = recent["t"] if recent and recent["t"] else 0
+        if online and before["n"] >= 2 and now - last > 600:
+            self._last_reinit = now
+            self.counters["reinits"] = self.counters.get("reinits", 0) + 1
+            db.log_locate_event("reinit", None, now, family_quiet_s=round(now - last), online_family_devices=online,
+                                ctx=self._ctx_summary(dict(mgr._server_ctx or {})))
+            log.warning("family fixes quiet for %d s with %d family devices online: resetting Find My session state",
+                        now - last, online)
+            mgr._server_ctx = None
 
     def poll_once(self, force_locate: bool = False) -> None:
         from pyicloud.exceptions import (PyiCloud2FARequiredException, PyiCloudAuthRequiredException,
@@ -387,7 +437,8 @@ class ICloudSource:
         self._check_movement(new_owners)
         # Raw response kept for inspection (owner mapping, new fields). Local, 0600.
         p = DATA_DIR / "last_fmip.json"
-        p.write_text(json.dumps({"userInfo": info, "content": raw_dump}, indent=1, default=str))
+        p.write_text(json.dumps({"userInfo": info, "serverContext": self._ctx_summary(dict(mgr._server_ctx or {})),
+                                 "content": raw_dump}, indent=1, default=str))
         p.chmod(0o600)
 
     def _check_movement(self, owners: set[str]) -> None:

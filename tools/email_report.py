@@ -50,6 +50,8 @@ def indicators(c, t0: float, t1: float) -> dict:
         "resumes": sum(1 for _, e, _, _ in rows if e == "resume"),
         "blocked_budget": cnt(rows, "blocked", lambda d: d.get("reason") == "budget"),
         "blocked_paused": cnt(rows, "blocked", lambda d: d.get("reason") == "paused"),
+        "reinits": [dt.datetime.fromtimestamp(ts).strftime("%H:%M") for ts, e, _, _ in rows if e == "reinit"],
+        "ctx_changes": cnt(rows, "ctx_change"),
     }
 
 
@@ -92,7 +94,8 @@ def main() -> None:
             f"ignored {ind['family_isLocating_false']}; answered {ind['family_answered']}, unanswered {ind['family_unanswered']}, "
             f"median answer {ind['family_median_answer_s'] or '-'} s; self-reported fixes {ind['family_self_fixes']}",
             f"  Own devices: {ind['own_requests']} requests, acted on {ind['own_isLocating_true']}, answered {ind['own_answered']}, self-reported {ind['own_self_fixes']}",
-            f"  Pauses: {ind['pauses'] or 'none'}; resumes {ind['resumes']}; blocked by budget {ind['blocked_budget']}x, by pause {ind['blocked_paused']}x"])
+            f"  Pauses: {ind['pauses'] or 'none'}; resumes {ind['resumes']}; blocked by budget {ind['blocked_budget']}x, by pause {ind['blocked_paused']}x",
+            f"  Family-view freezes reset (reinit): {ind['reinits'] or 'none'}; session-state changes after locates: {ind['ctx_changes']}"])
 
     model_notes = (DATA / "tuning_model.md").read_text() if (DATA / "tuning_model.md").exists() else "(no notes yet)"
     tlog = (DATA / "tuning_log.md").read_text().strip().splitlines()[3:] if (DATA / "tuning_log.md").exists() else []
