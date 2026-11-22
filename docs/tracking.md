@@ -23,8 +23,9 @@ minutes. What we measured on 2026-11-21:
   arrived within a minute of each new session. Within a session they go stale, apart from occasional
   reports from the phones themselves.
 
-So the app reads every 60 seconds (`poll_seconds`), starts a fresh session every 10 minutes
-(`session_renew_minutes`), and a watchdog starts one early if family fixes stop for 10 minutes while
+So the app reads every 60 seconds (`poll_seconds`), starts a fresh session every 5 minutes
+(`session_renew_minutes`), every 3 minutes while any family member is moving
+(`session_renew_moving_minutes`, never under 2), and a watchdog starts one early if family fixes stop for 10 minutes while
 their devices are online. **For family members, the session interval is what sets freshness.**
 Following them faster can't help. Family fresh-location requests are kept to a probe (2 an hour) in
 case Apple's behaviour changes.

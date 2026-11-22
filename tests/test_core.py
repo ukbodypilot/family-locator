@@ -399,6 +399,48 @@ def test_follow_targets_the_moving_device_not_the_one_left_behind():
     assert t.locate_target("Pat", parked[-1][0] + 1) is None
 
 
+def test_sessions_renew_faster_while_family_moves():
+    import threading
+    from famloc import icloud_source
+    from famloc.icloud_source import ICloudSource
+    class M:
+        def __init__(self):
+            self._server_ctx = None; self.inits = []; self.t = 0
+            self.user_info = {"firstName": "Me", "lastName": "", "membersInfo": {}}
+            self._refresh_lock = threading.Lock()
+        def __iter__(self): return iter([])
+        def refresh(self, locate=False):
+            if self._server_ctx is None: self.inits.append(self.t)
+            self._server_ctx = {"sessionLifespan": 900000}
+    c2 = config.Config(email_enabled=False, poll_seconds=60, session_renew_minutes=5, session_renew_moving_minutes=3)
+    src = ICloudSource(c2, Alerter(c2)); m = M()
+    class Api: devices = m
+    src.api = Api(); src.state = "ok"
+    db.upsert_device("icloud:kid-phone", "icloud", "Kid phone", owner="Kid", device_class="iPhone")
+    real = icloud_source.time.time; clock = {"t": 4_000_000.0}
+    icloud_source.time.time = lambda: clock["t"]
+    try:
+        def run(minutes):
+            for _ in range(int(minutes * 60 / 15)):
+                clock["t"] += 15; m.t = round((clock["t"] - 4_000_000) / 60, 2); src.tick(clock["t"])
+        run(20)                                               # nobody moving: every 5 min
+        quiet = list(m.inits)
+        src.tracker.follow_until["Kid"] = clock["t"] + 15 * 60   # Kid starts moving for 15 min
+        src.tracker.follow_started["Kid"] = clock["t"]
+        run(15)
+        moving = [t for t in m.inits if t > quiet[-1]]
+        run(20)                                               # at rest again
+        after = [t for t in m.inits if t > 35]
+    finally:
+        icloud_source.time.time = real
+    gap = lambda xs: [round(b - a, 1) for a, b in zip(xs, xs[1:])]
+    assert all(4.9 <= g <= 5.5 for g in gap(quiet)), gap(quiet)
+    assert all(2.9 <= g <= 3.5 for g in gap(moving)), gap(moving)
+    assert all(4.9 <= g <= 5.5 for g in gap(after)), gap(after)
+    ev = db.q("SELECT data FROM locate_events WHERE event='session_renew' ORDER BY id DESC LIMIT 20")
+    assert any("moving: Kid" in r["data"] for r in ev)
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

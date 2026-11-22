@@ -316,6 +316,11 @@ class ICloudSource:
         mins = float(self.cfg.session_renew_minutes)
         if mins <= 0 or not mgr._server_ctx:
             return
+        # Each new session makes Apple locate every family device, so while a family member is
+        # travelling, renew faster (their own locate requests are ignored; this is the only lever).
+        movers = [o for o in self._owners() if not self.tracker.is_self(o) and self.tracker.following(o, now) == "moving"]
+        if movers:
+            mins = min(mins, max(2.0, float(self.cfg.session_renew_moving_minutes)))
         if not self._session_started:
             self._session_started = now  # session predates this code path (e.g. first access at startup)
             return
@@ -323,7 +328,8 @@ class ICloudSource:
         mins = max(1.0, min(mins, lifespan_min - 1))
         if now - self._session_started >= mins * 60:
             db.log_locate_event("session_renew", None, now, age_s=round(now - self._session_started),
-                                lifespan_min=lifespan_min)
+                                lifespan_min=lifespan_min, interval_min=mins,
+                                reason=("moving: " + ", ".join(movers)) if movers else "schedule")
             mgr._server_ctx = None
 
     def _family_watchdog(self, mgr, now: float) -> None:
