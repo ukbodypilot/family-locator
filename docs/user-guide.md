@@ -45,6 +45,19 @@ The **⋯** button on a device (shown on hover) has:
 
 **Items** (AirTags) and **Photo history** appear as separate groups below the people.
 
+### Showing just some people on the map
+
+The eye button next to each person shows or hides them on the map: their marker, track and
+timeline lane. A person's **⋯** menu has **Show only (name) on the map**. While anyone is hidden, a
+bar at the top of the list says how many are showing, with **Show all** to bring everyone back.
+
+Devices have their own eye button (open **Show devices**). A hidden device stops being used for
+the person's position, so you can, say, ignore an iPad left at home. If every device a person
+carries is hidden, their row reads "Devices hidden on the map".
+
+This is a view setting for your browser only. It doesn't change alerts, tracking or what anyone
+else sees, unlike **Hide this device**, which hides a device for everyone.
+
 ## The map
 
 - **One marker per person,** with their initials in their colour. A dashed ring means the fix is

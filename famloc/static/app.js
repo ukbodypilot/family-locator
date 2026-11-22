@@ -236,6 +236,22 @@ const S = {
   expanded: new Set(store.get("expanded", [])), afterPlaceSave: null,
 };
 const visible = (d) => S.showHidden || !d.hidden;
+/* Map visibility, per viewer (this browser): "p:<owner>" hides a person, a device id hides one device. */
+S.mapOff = new Set(store.get("mapOff", []));
+const devOn = (d) => visible(d) && !S.mapOff.has(d.id);
+const personOn = (p) => !S.mapOff.has("p:" + p.name);
+function setMapOff(keys, off) {
+  for (const k of keys) off ? S.mapOff.add(k) : S.mapOff.delete(k);
+  store.set("mapOff", [...S.mapOff]);
+  computeRuns(); drawLanes(); render();
+}
+function showOnly(p) { setMapOff(S.people.filter((x) => x !== p).map((x) => "p:" + x.name), true); setMapOff(["p:" + p.name, ...p.devices.map((d) => d.id)], false); }
+function showEveryone() { S.mapOff.clear(); setMapOff([], false); }
+const EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 6.1A9.7 9.7 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+function eyeBtn(on, label) {
+  return `<button class="eye${on ? "" : " is-off"}" aria-pressed="${on}" aria-label="${on ? "Hide" : "Show"} ${esc(label)} on the map" title="${on ? "Hide on the map" : "Show on the map"}">${on ? EYE : EYE_OFF}</button>`;
+}
 const ownerName = (owner) => (S.personByName && S.personByName[owner] ? S.personByName[owner].display : owner);
 const CARRY_RANK = { phone: 0, watch: 1, tablet: 2 };
 
@@ -283,7 +299,7 @@ function lastMoveAt(id, t) { const m = MOVES[id]; if (!m || !m.length) return -I
 function personPos(p, t = S.t) {
   const cands = [];
   for (const d of p.carried) {
-    if (!visible(d)) continue;
+    if (!devOn(d)) continue;
     const pt = lastAt(d.id, t) || (S.follow && d.last && d.last.ts <= t + 60 ? lastOf(d) : null);
     if (pt) cands.push({ dev: d, p: pt, rank: CARRY_RANK[kindOf(d)] ?? 3 });
   }
@@ -302,7 +318,7 @@ function personPos(p, t = S.t) {
 function primaryOf(p) {
   let best = null;
   for (const d of p.carried) {
-    if (!visible(d)) continue;
+    if (!devOn(d)) continue;
     const n = (S.data[d.id] || []).length;
     if (!n) continue;
     const key = [-(CARRY_RANK[kindOf(d)] ?? 3), n];
@@ -318,7 +334,7 @@ function fenceAt(lat, lon) {
 /* Status line for a person at the cursor. */
 function personStatus(p) {
   const pos = personPos(p);
-  if (!pos) return { pos: null, text: "No location yet", stale: true };
+  if (!pos) return { pos: null, text: p.carried.some((d) => visible(d) && S.mapOff.has(d.id)) ? "Devices hidden on the map" : "No location yet", stale: true };
   const [ts, lat, lon] = pos.p;
   const g = fenceAt(lat, lon);
   const run = (S.runs.find((r) => r.person === p.name) || { runs: [] }).runs.find((r) => r.t0 <= ts && ts <= r.t1 + 60);
@@ -428,7 +444,7 @@ async function loadPoints() {
 }
 function fitAll() {
   const ll = [];
-  for (const p of S.people) { const pos = personPos(p); if (pos) ll.push([pos.p[1], pos.p[2]]); }
+  for (const p of S.people.filter(personOn)) { const pos = personPos(p); if (pos) ll.push([pos.p[1], pos.p[2]]); }
   if (ll.length === 1) map.setView(ll[0], 15); else if (ll.length) map.fitBounds(ll, { padding: [70, 70], maxZoom: 15 });
 }
 
@@ -441,7 +457,7 @@ const LANE_TOP = 14;
 function markerSeq(p) {
   const all = [];
   for (const d of p.carried) {
-    if (!visible(d)) continue;
+    if (!devOn(d)) continue;
     for (const pt of S.data[d.id] || []) all.push([pt, d]);
   }
   all.sort((x, y) => x[0][0] - y[0][0]);
@@ -451,7 +467,7 @@ function markerSeq(p) {
   } finally { S.follow = saved; }
 }
 function computeRuns() {
-  S.runs = S.people.map((p) => {
+  S.runs = S.people.filter(personOn).map((p) => {
     const d = primaryOf(p);
     const a = markerSeq(p);
     const states = a.map((pt, i) => {
@@ -599,7 +615,7 @@ function render(full = false) {
 
   // people: one marker each, merged when together
   const placed = [];
-  for (const p of S.people) {
+  for (const p of S.people.filter(personOn)) {
     const st = personStatus(p);
     // Track the device the marker is placed by, so marker and line always join. Draw the main
     // device too (faintly) when it's a different one, e.g. an iPad that stayed at home.
@@ -635,15 +651,15 @@ function render(full = false) {
   }
   // items (AirTags etc.)
   for (const d of S.items) {
-    if (!visible(d)) continue;
+    if (!devOn(d)) continue;
     const pt = lastAt(d.id, S.t) || (S.follow ? lastOf(d) : null); if (!pt) continue;
     drawTrack(d, "#7a7f86", { weight: 2, dash: "4 4" });
     L.marker([pt[1], pt[2]], { icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11], html: `<div class="dmark" style="background:#5e6b78;width:22px;height:22px;display:grid;place-items:center"><svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:#fff;stroke-width:2">${ICONS.tag}</svg></div>` }), title: d.name })
       .bindPopup(() => fixPopup(d, pt, true)).addTo(L_people);
   }
   // every device separately
-  if (wantDevs) for (const p of S.people) for (const d of p.devices) {
-    if (!visible(d)) continue;
+  if (wantDevs) for (const p of S.people.filter(personOn)) for (const d of p.devices) {
+    if (!devOn(d)) continue;
     const pt = lastAt(d.id, S.t) || (S.follow ? lastOf(d) : null); if (!pt) continue;
     L.marker([pt[1], pt[2]], { icon: L.divIcon({ className: "", iconSize: [14, 14], iconAnchor: [7, 7], html: `<div class="dmark" style="background:${p.color}"></div>` }), title: d.name })
       .bindTooltip(d.name, { direction: "top", offset: [0, -6] }).bindPopup(() => fixPopup(d, pt, true)).addTo(L_devices);
@@ -710,12 +726,14 @@ function devSub(d) {
 }
 function devRow(d) {
   const row = document.createElement("div");
-  row.className = "dev" + (d.hidden ? " off" : "");
+  const on = !S.mapOff.has(d.id);
+  row.className = "dev" + (d.hidden ? " off" : "") + (on ? "" : " mapoff");
   row.innerHTML = `${icon(d)}<span class="dev-name" title="${esc(d.model || "")}">${esc(d.name)}</span>
-    <button class="dev-more" aria-label="Actions for ${esc(d.name)}" aria-haspopup="menu" aria-expanded="false">⋯</button>
+    ${eyeBtn(on, d.name)}<button class="dev-more" aria-label="Actions for ${esc(d.name)}" aria-haspopup="menu" aria-expanded="false">⋯</button>
     <span class="dev-sub">${esc(devSub(d))}</span>`;
   row.addEventListener("click", (e) => {
     if (e.target.closest(".dev-more")) return devMenu(d, e.target.closest(".dev-more"));
+    if (e.target.closest(".eye")) return setMapOff([d.id], on);
     const p = lastAt(d.id, S.t) || lastOf(d);
     if (p) { fly([p[1], p[2]], Math.max(map.getZoom(), 16)); showMarkerFor(d, p); }
     else toast(`Apple has no location for ${d.name}. It's offline or has location turned off.`);
@@ -730,20 +748,27 @@ function followBadge(p) {
 }
 function renderPeople() {
   const el = $("#peopleList"); el.innerHTML = "";
+  const nOn = S.people.filter(personOn).length, devOff = [...S.mapOff].some((k) => !k.startsWith("p:"));
+  if (S.people.length && (nOn < S.people.length || devOff)) {
+    const bar = document.createElement("div"); bar.className = "mapfilter";
+    bar.innerHTML = `<span>${nOn < S.people.length ? `Showing ${nOn} of ${S.people.length} people on the map` : "Some devices are hidden on the map"}</span><button class="btn small">Show all</button>`;
+    $("button", bar).onclick = showEveryone; el.appendChild(bar);
+  }
   if (!S.devices.length) {
     el.innerHTML = '<p class="muted">No one to show yet. Sign in to iCloud on the <a href="#setup" onclick="openTab(\'setup\')">Setup</a> tab and your family will appear here.</p>';
     return;
   }
   for (const p of S.people) {
     const st = personStatus(p), dev = st.pos ? st.pos.dev : p.carried[0];
-    const box = document.createElement("div"); box.className = "person";
+    const pOn = personOn(p);
+    const box = document.createElement("div"); box.className = "person" + (pOn ? "" : " mapoff");
     const devs = p.devices.filter(visible);
     const withFix = devs.filter((d) => d.last).sort((a, b) => b.last.ts - a.last.ts), noFix = devs.filter((d) => !d.last);
     const open = S.expanded.has(p.name);
     box.innerHTML = `<div class="person-main" tabindex="0" role="button" aria-label="Show ${esc(p.display)} on the map">
         <div class="avatar" style="background:${p.color}">${esc(initials(p.display))}</div>
         <div class="person-name">${esc(p.display)}${p.display !== p.name ? ` <span class="muted small" title="Name in Apple's family data">${esc(p.name)}</span>` : ""}</div>
-        <div class="person-side"><button class="dev-more person-more" aria-label="Actions for ${esc(p.display)}" aria-haspopup="menu" aria-expanded="false">⋯</button>${st.pos ? `<span>${esc(st.when)}</span>` : ""}${battHTML(dev)}</div>
+        <div class="person-side"><span class="side-btns">${eyeBtn(pOn, p.display)}<button class="dev-more person-more" aria-label="Actions for ${esc(p.display)}" aria-haspopup="menu" aria-expanded="false">⋯</button></span>${st.pos ? `<span>${esc(st.when)}</span>` : ""}${battHTML(dev)}</div>
         <div class="person-status ${st.stale ? "stale" : ""}">${st.text}${followBadge(p)}</div>
       </div>
       <div class="devs"><button class="devs-toggle" aria-expanded="${open}">${open ? "Hide" : "Show"} ${devs.length} device${devs.length === 1 ? "" : "s"}</button><div class="dev-list"></div></div>`;
@@ -757,8 +782,8 @@ function renderPeople() {
       }
     }
     const go = () => { if (st.pos) fly([st.pos.p[1], st.pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${p.display} yet.`); if (isPhone()) $("#app").classList.add("noside"); };
-    $(".person-main", box).onclick = (e) => { if (e.target.closest(".person-more")) return personMenu(p, e.target.closest(".person-more")); go(); };
-    $(".person-main", box).onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+    $(".person-main", box).onclick = (e) => { if (e.target.closest(".eye")) return setMapOff(["p:" + p.name], pOn); if (e.target.closest(".person-more")) return personMenu(p, e.target.closest(".person-more")); go(); };
+    $(".person-main", box).onkeydown = (e) => { if (e.target.closest("button")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
     $(".avatar", box).title = "Change colour";
     $(".avatar", box).onclick = (e) => { e.stopPropagation(); pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); }); };
     $(".devs-toggle", box).onclick = () => { open ? S.expanded.delete(p.name) : S.expanded.add(p.name); store.set("expanded", [...S.expanded]); renderPeople(); };
@@ -812,6 +837,9 @@ function personMenu(p, btn) {
       await refreshAll(); toast(n.trim() ? `Renamed to ${n.trim()}.` : `Using Apple's name, ${p.name}.`);
     }],
     ["Change colour", () => pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); })],
+    S.people.filter(personOn).length === 1 && personOn(p)
+      ? ["Show everyone on the map", showEveryone]
+      : [`Show only ${firstName(p.display)} on the map`, () => showOnly(p)],
     ["Insights", () => { const d = primaryOf(p) || p.carried[0]; if (d) openInsights(d.id); }],
     p.tracking && p.tracking.following
       ? ["Stop following", () => followPerson(p, 0)]

@@ -2,6 +2,13 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [Unreleased]
+
+- **Show or hide people and devices on the map.** An eye button on each person and device, **Show
+  only (name)** in a person's menu, and a **Show all** bar while anything is hidden. Hiding a
+  device takes it out of the person's position, e.g. an iPad left at home. Saved per browser;
+  alerts and tracking are unchanged.
+
 ## [1.6.0] -- 2026-11-21
 
 Family positions about a minute old instead of several, and your own phone answers in seconds.

@@ -114,7 +114,7 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .devs { margin: 6px 0 0 48px; display: flex; flex-direction: column; }
 .devs-toggle { background: none; border: 0; padding: 2px 0; cursor: pointer; color: var(--muted); font-size: 13px; text-align: left; }
 .devs-toggle:hover { color: var(--ink); }
-.dev { display: grid; grid-template-columns: 20px 1fr auto; gap: 0 8px; align-items: center; padding: 4px 4px 4px 0; border-radius: 5px; cursor: pointer; }
+.dev { display: grid; grid-template-columns: 20px 1fr auto auto; gap: 0 8px; align-items: center; padding: 4px 4px 4px 0; border-radius: 5px; cursor: pointer; }
 .dev:hover { background: var(--rule-2); }
 .dev.off { opacity: .45; }
 .dev-ico { width: 18px; height: 18px; fill: none; stroke: var(--ink-2); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -127,6 +127,17 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .nofix { margin-top: 2px; }
 .nofix .dev { opacity: .75; }
 @media (hover: none) { .dev-more { opacity: 1; } }
+/* show/hide on the map */
+.side-btns { display: flex; align-items: center; gap: 2px; }
+.eye { background: none; border: 0; cursor: pointer; padding: 3px; border-radius: 4px; color: var(--muted); display: grid; place-items: center; grid-row: span 2; }
+.eye svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.eye:hover { background: var(--rule); color: var(--ink); }
+.eye:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.eye.is-off { color: var(--ink); }
+.person.mapoff .avatar, .person.mapoff .person-name, .person.mapoff .person-status { opacity: .45; }
+.dev.mapoff .dev-ico, .dev.mapoff .dev-name, .dev.mapoff .dev-sub { opacity: .45; }
+.mapfilter .btn { white-space: nowrap; flex: none; }
+.mapfilter { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; margin-bottom: 4px; border-radius: 6px; background: var(--rule-2); font-size: 14px; }
 
 /* ---------- places / events / insights ---------- */
 .place-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--rule-2); cursor: pointer; }
