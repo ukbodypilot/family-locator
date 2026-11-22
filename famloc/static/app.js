@@ -333,6 +333,35 @@ function fenceAt(lat, lon) {
   return hit;
 }
 /* Status line for a person at the cursor. */
+/* Average speed while moving: path length over the device's last 3 fixes (more, up to 6, until
+   they span 3 min, so 30-s follow fixes aren't all noise). Only from ONE device (mixing devices
+   fakes jumps), only if the newest fix is recent, no gap > 35 min, and the net move clears
+   250 m / the fixes' accuracy, so GPS jitter at rest never shows as a speed. Fixes worse than
+   200 m (Apple's cell/Wi-Fi guesses) are skipped. */
+const SPEED_MAX_ACC = 200, SPEED_MIN_FIXES = 3, SPEED_MAX_FIXES = 6, SPEED_MIN_SPAN = 3 * 60, SPEED_FRESH = 15 * 60;
+function avgSpeed(pos, t = S.t) {
+  if (!pos) return null;
+  const a = S.data[pos.dev.id] || [];
+  const i = idxAt(a, pos.p[0]);
+  let pts = i >= 0 ? a.slice(Math.max(0, i - SPEED_MAX_FIXES + 1), i + 1) : [];
+  if (!pts.length || pts[pts.length - 1][0] < pos.p[0]) pts.push(pos.p);   // live fix not loaded yet
+  pts = pts.filter((q) => q[3] == null || q[3] <= SPEED_MAX_ACC);         // a 400-1600 m cell guess zig-zags the path
+  const last = pts[pts.length - 1];
+  if (t - last[0] > SPEED_FRESH) return null;
+  let k = pts.length - 1;                                  // walk back: 3 fixes, more until 3 min
+  while (k > 0 && pts[k][0] - pts[k - 1][0] <= 35 * 60
+         && (pts.length - k < SPEED_MIN_FIXES || last[0] - pts[k][0] < SPEED_MIN_SPAN)) k--;
+  pts = pts.slice(k);
+  if (pts.length < 2) return null;
+  const first = pts[0], span = last[0] - first[0];
+  if (span < 60) return null;
+  if (haversine(first[1], first[2], last[1], last[2]) <= Math.max(250, (first[3] || 0) + (last[3] || 0))) return null;
+  let path = 0;
+  for (let j = 1; j < pts.length; j++) path += haversine(pts[j - 1][1], pts[j - 1][2], pts[j][1], pts[j][2]);
+  return { kmh: path / span * 3.6, fixes: pts.length, span };
+}
+const fmtSpeed = (v) => `${Math.round(v.kmh)} km/h (${Math.round(v.kmh / 1.609344)} mph)`;
+
 function personStatus(p) {
   const pos = personPos(p);
   if (!pos) return { pos: null, text: p.carried.some((d) => visible(d) && S.mapOff.has(d.id)) ? "Devices hidden on the map" : "No location yet", stale: true };
@@ -679,10 +708,11 @@ function popupEl(html, handlers) {
 }
 function personPopup(p) {
   const st = personStatus(p), [ts, lat, lon, acc] = st.pos.p, d = st.pos.dev;
-  const canLocate = d.source === "icloud";
+  const canLocate = d.source === "icloud", sp = avgSpeed(st.pos);
   return popupEl(`<h3>${esc(p.display)}</h3><p>${st.text}</p>
     <table><tr><td>Fix</td><td>${esc(dt(ts))} (${esc(ago(ts))})</td></tr>
     <tr><td>From</td><td>${esc(d.name)}</td></tr>
+    ${sp ? `<tr><td>Speed</td><td>${fmtSpeed(sp)} <span class="muted">avg of ${sp.fixes} fixes over ${dur(sp.span / 60)}</span></td></tr>` : ""}
     <tr><td>Accuracy</td><td>${acc != null ? `within ${Math.round(acc)} m` : "unknown"}</td></tr>
     ${d.battery != null ? `<tr><td>Battery</td><td>${Math.round(d.battery * 100)}%</td></tr>` : ""}</table>
     <div class="acts">${canLocate ? '<a data-a="locate">Locate now</a>' : ""}<a data-a="ins">Insights</a><a data-a="here">What's here?</a>
