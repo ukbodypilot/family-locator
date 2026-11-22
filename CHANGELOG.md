@@ -2,6 +2,19 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.3.2] -- 2026-11-21
+
+- **Backs off when phones don't answer.** Each fresh-location request is checked for a new fix
+  within 3 minutes. After 3 unanswered requests in a row, that person's interval doubles, up to
+  once an hour, and resets as soon as they answer. This responds to Apple quietly limiting active
+  locates of other family members' devices: replies stay successful but show `isLocating: false`,
+  and no new fix follows.
+- **No request burst after a restart.** The first requests wait 2 minutes and are spread 30
+  seconds apart.
+- **Diagnostics.** Apple's reply to every request is logged (`locate <person>: http=…
+  isLocating=…`), `/metrics` has per-person answered, unanswered and backoff figures, and
+  `/api/icloud/locate-log` lists the last 40 replies.
+
 ## [1.3.1] -- 2026-11-21
 
 - **Fix: blank page when the heatmap had been left on.** The saved heatmap layer was re-added

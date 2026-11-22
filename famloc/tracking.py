@@ -36,6 +36,12 @@ class Tracker:
         self.cap_until: dict[str, float] = {}
         self.sent_count: dict[str, int] = {}
         self.follows_started = 0
+        # answer tracking: did a new fix follow each request? Back off people whose phones don't answer
+        # (phone unreachable, or Apple quietly not passing requests on).
+        self.pending: dict[str, float] = {}
+        self.streak: dict[str, int] = {}
+        self.answered: dict[str, int] = {}
+        self.unanswered: dict[str, int] = {}
 
     # ------------------------------------------------------------ settings
     @staticmethod
@@ -80,10 +86,42 @@ class Tracker:
             return "moving"
         return None
 
+    ANSWER_WINDOW_S = 180
+    BACKOFF_AFTER = 3      # unanswered requests in a row before slowing down
+    BACKOFF_CAP_MIN = 60
+
+    def backoff_factor(self, owner: str) -> int:
+        k = self.streak.get(owner, 0) - self.BACKOFF_AFTER + 1
+        return 1 if k <= 0 else 2 ** min(k, 6)
+
     def interval_minutes(self, owner: str, now: float) -> float:
-        if self.following(owner, now):
-            return float(self.cfg.moving_locate_minutes)
-        return self.normal_minutes(owner)
+        f = self.following(owner, now)
+        base = float(self.cfg.moving_locate_minutes) if f else self.normal_minutes(owner)
+        if base <= 0 or f == "manual":
+            return base
+        factor = self.backoff_factor(owner)
+        return base if factor == 1 else max(base, min(base * factor, self.BACKOFF_CAP_MIN))
+
+    def note_fix(self, owner: str, fix_ts: float) -> None:
+        """A new fix arrived for this person: it answers any request sent shortly before it."""
+        with self.lock:
+            t = self.pending.get(owner)
+            if t is not None and fix_ts >= t - 30:
+                self.pending.pop(owner, None)
+                self.answered[owner] = self.answered.get(owner, 0) + 1
+                self.streak[owner] = 0
+
+    def check_timeouts(self, now: float) -> list[str]:
+        """Requests with no new fix within ANSWER_WINDOW_S count as unanswered. Returns those owners."""
+        out = []
+        with self.lock:
+            for o, t in list(self.pending.items()):
+                if now - t > self.ANSWER_WINDOW_S:
+                    self.pending.pop(o, None)
+                    self.unanswered[o] = self.unanswered.get(o, 0) + 1
+                    self.streak[o] = self.streak.get(o, 0) + 1
+                    out.append(o)
+        return out
 
     def due(self, owners: list[str], now: float) -> list[str]:
         out = []
@@ -93,15 +131,17 @@ class Tracker:
                 if iv <= 0:
                     continue
                 if o not in self.last_sent:
-                    # first run: stagger people 20 s apart instead of waking everyone at once
-                    self.last_sent[o] = now - iv * 60 + i * 20
+                    # after a start: first request 2 min in, people 30 s apart, never a burst at startup
+                    self.last_sent[o] = now - iv * 60 + 120 + i * 30
                 if now - self.last_sent[o] >= iv * 60:
                     out.append(o)
         return out
 
-    def mark_sent(self, owner: str, now: float) -> None:
+    def mark_sent(self, owner: str, now: float, requested: bool = True) -> None:
         with self.lock:
             self.last_sent[owner] = now
+            if requested:
+                self.pending.setdefault(owner, now)
             self.sent_count[owner] = self.sent_count.get(owner, 0) + 1
 
     def next_due(self, owner: str, now: float) -> float | None:
@@ -198,4 +238,6 @@ class Tracker:
             "follow_enabled": self.follow_enabled(owner),
             "following": f, "following_until": (self.manual_until.get(owner) if f == "manual" else self.follow_until.get(owner)) if f else None,
             "next_locate": self.next_due(owner, now), "locates_sent": self.sent_count.get(owner, 0),
+            "answered": self.answered.get(owner, 0), "unanswered": self.unanswered.get(owner, 0),
+            "unanswered_streak": self.streak.get(owner, 0), "backoff": self.backoff_factor(owner),
         }

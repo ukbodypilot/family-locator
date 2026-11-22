@@ -58,6 +58,28 @@ A phone on the default 15 minutes, parked, then driving for 20 minutes, then par
 1:13  fresh location
 ```
 
+## When phones don't answer
+
+Every fresh-location request is checked: did a new fix arrive within 3 minutes? After 3 requests
+in a row with no answer, that person's interval doubles, then doubles again, up to once an hour. It
+resets as soon as their phone answers. Manual follow is never slowed down.
+
+This matters because Apple seems to limit how often one account can actively locate **other family
+members'** devices. When that happens, its replies still look successful, but the device shows
+`isLocating: false` and no new fix arrives. Locating your own devices carries on as normal. It
+cleared by itself after about 25 quiet minutes. After a restart, the first requests wait 2 minutes
+and are spread 30 seconds apart, so a restart never sends a burst.
+
+To see what's happening:
+
+```bash
+journalctl --user-unit family-locator | grep "locate "      # Apple's reply to each request
+curl -s localhost:8790/metrics | grep -E "answered|backoff"   # per person, anonymised
+```
+
+A proxy or different IP address wouldn't help: requests are signed in as your Apple ID, so any
+limit follows the account.
+
 ## Follow now
 
 **Follow for 30 minutes** in a person's ⋯ menu starts following straight away, whether or not

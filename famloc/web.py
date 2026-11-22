@@ -271,6 +271,9 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
             following = 1 if icloud.tracker.following(owner, time.time()) else 0
             lines.append(f'famloc_person_locates_total{{person="p{i}"}} {n}')
             lines.append(f'famloc_person_following{{person="p{i}"}} {following}')
+            lines.append(f'famloc_person_answered_total{{person="p{i}"}} {icloud.tracker.answered.get(owner, 0)}')
+            lines.append(f'famloc_person_unanswered_total{{person="p{i}"}} {icloud.tracker.unanswered.get(owner, 0)}')
+            lines.append(f'famloc_person_backoff{{person="p{i}"}} {icloud.tracker.backoff_factor(owner)}')
         for k, v in ALERT_COUNTERS.items():
             lines.append(f"famloc_{k}_total {v}")
         n = db.q1("SELECT COUNT(*) AS n FROM points")["n"]
@@ -316,6 +319,10 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
             raise HTTPException(409, f"iCloud state is {icloud.state}")
         icloud.poll_once(force_locate=locate)
         return icloud.status()
+
+    @app.get("/api/icloud/locate-log")
+    def locate_log():
+        return getattr(icloud, "locate_log", [])
 
     @app.post("/api/icloud/locate/{dev_id:path}")
     def icloud_locate_one(dev_id: str):

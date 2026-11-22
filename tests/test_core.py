@@ -125,8 +125,9 @@ def test_tracker_intervals_and_overrides():
 def test_tracker_due_staggers_then_respects_interval():
     from famloc.tracking import Tracker
     t = Tracker(config.Config(locate_minutes=15))
-    assert t.due(["A", "B", "C"], 10_000) == ["A"]          # B, C staggered 20 s / 40 s later
-    assert t.due(["A", "B", "C"], 10_025) == ["A", "B"]     # A not marked sent yet
+    assert t.due(["A", "B", "C"], 10_000) == []             # nothing in the first 2 minutes after start
+    assert t.due(["A", "B", "C"], 10_120) == ["A"]          # B, C staggered 30 s / 60 s later
+    assert t.due(["A", "B", "C"], 10_150) == ["A", "B"]     # A not marked sent yet
     for o in ("A", "B", "C"):
         t.mark_sent(o, 10_050)
     assert t.due(["A", "B", "C"], 10_050 + 14 * 60) == []
@@ -266,6 +267,22 @@ def test_config_floors():
     assert got["moving_locate_minutes"] == 0.5
     got = config.apply_overrides(c, {"locate_minutes": 1, "moving_locate_minutes": 0.5})
     assert got == {"locate_minutes": 1, "moving_locate_minutes": 0.5}
+
+
+def test_tracker_backs_off_unanswered_and_recovers():
+    from famloc.tracking import Tracker
+    t = Tracker(config.Config(locate_minutes=15, moving_locate_minutes=2))
+    now = 0.0
+    for i in range(3):                       # three requests, no fix follows any of them
+        t.mark_sent("Kid", now); now += 200; t.check_timeouts(now)
+    assert t.streak["Kid"] == 3 and t.backoff_factor("Kid") == 2 and t.interval_minutes("Kid", now) == 30
+    t.mark_sent("Kid", now); now += 200; t.check_timeouts(now)
+    assert t.interval_minutes("Kid", now) == 60      # 4x, capped at an hour
+    t.mark_sent("Kid", now); t.note_fix("Kid", now + 20)   # phone answers
+    assert t.streak["Kid"] == 0 and t.interval_minutes("Kid", now) == 15
+    t.start_manual("Kid", 30, now)                          # manual follow is never slowed
+    t.streak["Kid"] = 9
+    assert t.interval_minutes("Kid", now + 1) == 2
 
 
 if __name__ == "__main__":

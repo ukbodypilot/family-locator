@@ -183,15 +183,21 @@ class ICloudSource:
             try:
                 mgr = self.api.devices
                 sent = False
+                for owner in self.tracker.check_timeouts(now):
+                    st = self.tracker.status(owner, now)
+                    if st["unanswered_streak"] == self.tracker.BACKOFF_AFTER:
+                        log.warning("no new fix from %s after %d requests in a row; backing off (every %s min)",
+                                    owner, st["unanswered_streak"], st["effective_minutes"])
                 for owner in self.tracker.due(self._owners(), now):
                     dev = primary_device(owner, now - 86400, now)
                     if dev is None or json.loads(dev["meta"] or "{}").get("locationCapable") is False:
-                        self.tracker.mark_sent(owner, now)  # nothing locatable; try again next interval
+                        self.tracker.mark_sent(owner, now, requested=False)  # nothing locatable
                         continue
-                    if self._request_locate(mgr, dev["id"]):
+                    ok = self._request_locate(mgr, dev["id"], owner)
+                    if ok:
                         self.last_locate = now
                         sent = True
-                    self.tracker.mark_sent(owner, now)
+                    self.tracker.mark_sent(owner, now, requested=ok)
                 if sent:
                     self.pending_until = now + 50  # answers take ~5-30 s
                 waiting = self.pending_until > now and now - self.last_read >= 10
@@ -212,8 +218,9 @@ class ICloudSource:
                 self.state_detail = f"poll error: {type(e).__name__}: {e}"
                 log.warning("tick error: %s", traceback.format_exc())
 
-    def _request_locate(self, mgr, dev_id: str) -> bool:
-        """Send Find My's single-device locate (selectedDevice) and return straight away."""
+    def _request_locate(self, mgr, dev_id: str, owner: str | None = None) -> bool:
+        """Send Find My's single-device locate (selectedDevice) and return straight away.
+        Apple's reply is summarised in self.locate_log (newest last) for diagnosis."""
         from pyicloud.services.findmyiphone import _FMIP_CLIENT_CONTEXT_TIMEZONE
         target = next((dv for dv in mgr if self._dev_id(dict(dv.data)) == dev_id), None)
         if target is None:
@@ -224,10 +231,25 @@ class ICloudSource:
                                  "shouldLocate": True, "selectedDevice": target.data["id"]},
                "serverContext": mgr._server_ctx}
         with mgr._refresh_lock:
-            resp = mgr.session.post(mgr._fmip_refresh_url, params=mgr.params, json=req, timeout=20).json()
+            r = mgr.session.post(mgr._fmip_refresh_url, params=mgr.params, json=req, timeout=20)
+            try:
+                resp = r.json()
+            except ValueError:
+                resp = {}
             if resp.get("serverContext"):
                 mgr._server_ctx = resp["serverContext"]
                 mgr._server_ctx["theftLoss"] = None
+        mine = next((c for c in resp.get("content") or [] if c.get("id") == target.data["id"]), {})
+        loc = mine.get("location") or {}
+        info = {"t": time.time(), "owner": owner, "http": getattr(r, "status_code", None),
+                "statusCode": resp.get("statusCode"), "devices_in_reply": len(resp.get("content") or []),
+                "isLocating": mine.get("isLocating"), "fix_age_s": round(time.time() - loc["timeStamp"] / 1000) if loc.get("timeStamp") else None,
+                "deviceStatus": mine.get("deviceStatus")}
+        self.locate_log = (getattr(self, "locate_log", []) + [info])[-40:]
+        bad = info["http"] not in (200, None) or (info["statusCode"] not in (None, "200", 200))
+        (log.warning if bad else log.info)("locate %s: http=%s statusCode=%s isLocating=%s fix_age=%ss devices_in_reply=%s",
+                                           owner, info["http"], info["statusCode"], info["isLocating"],
+                                           info["fix_age_s"], info["devices_in_reply"])
         self.counters["single_locates"] = self.counters.get("single_locates", 0) + 1
         return True
 
@@ -331,6 +353,7 @@ class ICloudSource:
                 self.alerter.check_fix(row, ts, lat, lon, acc)
                 if owner and any(k in (d.get("deviceClass") or "") for k in ("iPhone", "Watch", "iPad")):
                     new_owners.add(owner)
+                    self.tracker.note_fix(owner, ts)
         self.counters["devices"] = n
         self._check_movement(new_owners)
         # Raw response kept for inspection (owner mapping, new fields). Local, 0600.
