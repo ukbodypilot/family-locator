@@ -119,8 +119,9 @@ Your choices are remembered in this browser.
   all show that moment, and a banner reads "Viewing Thu 19 Nov 11:15" with **Back to now**. While
   you're viewing the past, the automatic refresh leaves you where you are.
 - **Playback.** Press play to animate. The **Speed** slider sets how much time passes per second,
-  from 1 minute to 1 week. The **Trail** slider sets how much track shows behind the cursor, from
-  15 minutes to 7 days, or the whole track at the far right. Both are remembered in your browser.
+  anywhere from 1 minute to 1 week. The **Trail** slider sets how much track shows behind the
+  cursor, anywhere from 15 minutes to 7 days, or the whole track at the far right. Both are
+  continuous on a log scale, so the short end has as much room as the long end. Both are remembered in your browser.
 
 ## Search
 

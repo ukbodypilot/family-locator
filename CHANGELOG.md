@@ -4,7 +4,7 @@ All notable changes to Family Locator. The version is the git tag.
 
 ## [Unreleased]
 
-- **Timeline:** playback speed and trail length are sliders, not drop-downs, with more stops
+- **Timeline:** playback speed and trail length are continuous log-scale sliders, not drop-downs
   (speed 1 min to 1 week per second; trail 15 min to 7 days, or whole track), remembered per
   browser and shown on phones too. Lanes are taller (28 px, 20 px on phones) with more room
   around them.

@@ -1246,24 +1246,30 @@ async function refreshAll() {
   S.lastRefresh = now();
   await loadPoints();
 }
-/* playback speed and trail: sliders over fixed stops (seconds); the last trail stop = whole track */
-const SPEEDS = [[60, "1 min/s"], [300, "5 min/s"], [600, "10 min/s"], [1800, "30 min/s"], [3600, "1 h/s"], [10800, "3 h/s"],
-  [21600, "6 h/s"], [43200, "12 h/s"], [86400, "1 day/s"], [604800, "1 week/s"]];
-const TRAILS = [[900, "15 min"], [3600, "1 hour"], [3 * 3600, "3 hours"], [6 * 3600, "6 hours"], [12 * 3600, "12 hours"],
-  [86400, "1 day"], [3 * 86400, "3 days"], [7 * 86400, "7 days"], [0, "Whole track"]];
-const stop = (arr, el) => arr[Math.max(0, Math.min(arr.length - 1, Number(el.value)))];
-function speedSec() { return stop(SPEEDS, $("#speed"))[0]; }
-function trailSec() { return stop(TRAILS, $("#trail"))[0]; }
+/* playback speed and trail: continuous sliders on a log scale (0-1000).
+   Speed 1 min/s .. 1 week/s; trail 15 min .. 7 days, with the far right end (>= 970) = whole track. */
+const SPEED_MIN = 60, SPEED_MAX = 7 * 86400, TRAIL_MIN = 900, TRAIL_MAX = 7 * 86400, TRAIL_WHOLE = 970;
+const logPos = (v, lo, hi) => lo * Math.pow(hi / lo, v);
+function niceSpan(sec) {
+  const r = (x) => (x < 10 ? Math.round(x * 10) / 10 : Math.round(x));
+  if (Math.round(sec / 60) < 60) return `${Math.round(sec / 60)} min`;
+  if (r(sec / 3600) < 24) { const h = r(sec / 3600); return `${h} ${h === 1 ? "hour" : "hours"}`; }
+  const d = r(sec / 86400); return `${d} ${d === 1 ? "day" : "days"}`;
+}
+function speedSec() { return logPos(Number($("#speed").value) / 1000, SPEED_MIN, SPEED_MAX); }
+function trailSec() { const v = Number($("#trail").value); return v >= TRAIL_WHOLE ? 0 : logPos(v / TRAIL_WHOLE, TRAIL_MIN, TRAIL_MAX); }
 function syncSliders() {
-  for (const [id, arr] of [["speed", SPEEDS], ["trail", TRAILS]]) {
-    const el = $("#" + id), [, label] = stop(arr, el);
+  const sp = niceSpan(speedSec()).replace(/ hours?$/, " h")+ "/s";
+  const tr = trailSec() ? niceSpan(trailSec()) : "Whole track";
+  for (const [id, label] of [["speed", sp], ["trail", tr]]) {
+    const el = $("#" + id);
     $("#" + id + "Out").textContent = label; el.setAttribute("aria-valuetext", label);
-    el.style.setProperty("--fill", (Number(el.value) / Number(el.max)) * 100 + "%");
+    el.style.setProperty("--fill", Number(el.value) / 10 + "%");
   }
 }
-$("#speed").value = store.get("speedStop", 4); $("#trail").value = store.get("trailStop", 8); syncSliders();
-$("#speed").oninput = () => { store.set("speedStop", Number($("#speed").value)); syncSliders(); };
-$("#trail").oninput = () => { store.set("trailStop", Number($("#trail").value)); syncSliders(); schedRender(); };
+$("#speed").value = store.get("speedPos", 444); $("#trail").value = store.get("trailPos", 1000); syncSliders();
+$("#speed").oninput = () => { store.set("speedPos", Number($("#speed").value)); syncSliders(); };
+$("#trail").oninput = () => { store.set("trailPos", Number($("#trail").value)); syncSliders(); schedRender(); };
 
 function handleHash() {
   const h = decodeURIComponent(location.hash.slice(1));
