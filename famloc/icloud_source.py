@@ -220,7 +220,10 @@ class ICloudSource:
                         self.tracker.record_reply(owner, info.get("isLocating"), now)
                     self.tracker.mark_sent(owner, now, requested=bool(info))
                 if sent:
-                    self.pending_until = now + 50  # answers take ~5-30 s
+                    # read fast until Apple's own locate deadline (serverContext.maxLocatingTime, 90 s)
+                    # has passed, so a phone that answers late is seen at once, not at the next cycle
+                    ml = ((mgr._server_ctx or {}).get("maxLocatingTime") or 90000) / 1000
+                    self.pending_until = now + min(ml, 180) + 10
                 waiting = self.pending_until > now and now - self.last_read >= 10
                 if now - self.last_read >= self.cfg.poll_seconds or waiting:
                     self.last_poll = now
