@@ -285,6 +285,21 @@ def test_tracker_backs_off_unanswered_and_recovers():
     assert t.interval_minutes("Kid", now + 1) == 2
 
 
+def test_own_device_at_rest_is_not_backed_off():
+    """Apple acted on our own phone's locate (isLocating=true) but kept the stored fix because the
+    phone hasn't moved: that is not a reason to slow down. Ignored requests still back off."""
+    from famloc.tracking import Tracker
+    t = Tracker(config.Config(locate_minutes=5, moving_locate_minutes=2))
+    t.self_owner = "Me"
+    now = 0.0
+    for i in range(5):
+        t.record_reply("Me", True, now); t.mark_sent("Me", now); now += 200; t.check_timeouts(now)
+    assert t.streak.get("Me", 0) == 0 and t.interval_minutes("Me", now) == 5
+    for i in range(3):                       # Apple didn't act: these count
+        t.record_reply("Me", False, now); t.mark_sent("Me", now); now += 200; t.check_timeouts(now)
+    assert t.streak["Me"] == 3 and t.interval_minutes("Me", now) == 10
+
+
 def _gov_tracker(**kw):
     from famloc.tracking import Tracker
     db.set_setting("locate_governor", {})

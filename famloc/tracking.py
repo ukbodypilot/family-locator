@@ -50,6 +50,7 @@ class Tracker:
         self.streak: dict[str, int] = {}
         self.answered: dict[str, int] = {}
         self.unanswered: dict[str, int] = {}
+        self.acked: dict[str, float] = {}   # own devices: request time Apple replied isLocating=true to
         self.self_owner: str | None = None   # the signed-in Apple ID's own name (exempt from the family budget)
         g = db.get_setting("locate_governor", {}) or {}
         self._blocked: dict[str, str] = {}   # person -> last logged block reason (log changes only)
@@ -140,6 +141,11 @@ class Tracker:
                 if now - t > self.ANSWER_WINDOW_S:
                     self.pending.pop(o, None)
                     self.unanswered[o] = self.unanswered.get(o, 0) + 1
+                    if self.is_self(o) and self.acked.pop(o, None) == t:
+                        # Apple did locate our own device but kept the stored fix: it hasn't moved.
+                        # That's an answer ("still here"), not a sign to slow down.
+                        db.log_locate_event("unanswered", o, streak=self.streak.get(o, 0), self_owner=True, at_rest=True)
+                        continue
                     before = self.backoff_factor(o)
                     self.streak[o] = self.streak.get(o, 0) + 1
                     out.append(o)
@@ -238,6 +244,9 @@ class Tracker:
         """Apple's isLocating on a family member's request is the throttle signal: false N times in a
         row pauses all family requests; any false reply while recovering (the probe) doubles the
         pause; a true reply clears everything."""
+        if self.is_self(owner) and is_locating is True:
+            with self.lock:
+                self.acked[owner] = now      # same 'now' that mark_sent stores as the pending time
         if self.is_self(owner) or is_locating is None or owner == "ALL":
             return
         with self.lock:
