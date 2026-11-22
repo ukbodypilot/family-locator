@@ -350,6 +350,55 @@ def test_late_fix_is_not_an_answer():
     assert ev[-2:] == ["fix", "answer"], ev
 
 
+def test_session_renewed_before_apple_lifespan():
+    import threading
+    from famloc import icloud_source
+    from famloc.icloud_source import ICloudSource
+    class M:
+        def __init__(self):
+            self._server_ctx = None; self.inits = []; self.t = 0
+            self.user_info = {"firstName": "Pat", "lastName": "", "membersInfo": {}}
+            self._refresh_lock = threading.Lock()
+        def __iter__(self): return iter([])
+        def refresh(self, locate=False):
+            if self._server_ctx is None:
+                self.inits.append(self.t)
+            self._server_ctx = {"sessionLifespan": 900000}
+    c2 = config.Config(email_enabled=False, poll_seconds=60, session_renew_minutes=14)
+    src = ICloudSource(c2, Alerter(c2)); m = M()
+    class Api: devices = m
+    src.api = Api(); src.state = "ok"
+    real = icloud_source.time.time; clock = {"t": 3_000_000.0}
+    icloud_source.time.time = lambda: clock["t"]
+    try:
+        for _ in range(int(40 * 60 / 15)):
+            clock["t"] += 15; m.t = round((clock["t"] - 3_000_000) / 60, 1)
+            src.tick(clock["t"])
+    finally:
+        icloud_source.time.time = real
+    assert len(m.inits) == 3, m.inits                     # ~0, 14, 28 min
+    assert all(14 <= b - a <= 15.5 for a, b in zip(m.inits, m.inits[1:])), m.inits
+
+
+def test_follow_targets_the_moving_device_not_the_one_left_behind():
+    from famloc.tracking import Tracker
+    t = Tracker(config.Config(movement_threshold_m=250, follow_rest_minutes=10, moving_locate_minutes=2))
+    phone_home = [(1000, 40.0, -100.0, 10), (1200, 40.0, -100.0, 10)]           # iPhone left at home
+    watch_out = [(1000, 40.0, -100.0, 10), (1150, 40.006, -100.0, 10)]          # Watch leaves with them
+    assert t.on_fixes("Pat", {"iphone": phone_home, "watch": watch_out}, 1200)
+    assert t.locate_target("Pat", 1201) == "watch"
+    # the watch keeps moving: still followed, still the target; the still phone never takes over
+    watch_more = watch_out + [(1270, 40.012, -100.0, 10)]
+    phone_more = phone_home + [(1300, 40.0, -100.0, 10)]
+    assert t.on_fixes("Pat", {"iphone": phone_more, "watch": watch_more}, 1300) and t.locate_target("Pat", 1301) == "watch"
+    # a phone at rest for the whole window doesn't end the follow while the watch moved recently
+    assert t.following("Pat", 1301) == "moving"
+    # the watch parks: rest window fills -> follow ends, target falls back to the main device
+    parked = watch_more + [(1270 + k * 120, 40.0121, -100.0, 10) for k in range(1, 6)]
+    assert not t.on_fixes("Pat", {"iphone": phone_more, "watch": parked}, parked[-1][0])
+    assert t.locate_target("Pat", parked[-1][0] + 1) is None
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

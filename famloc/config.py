@@ -35,6 +35,7 @@ class Config:
     family_pause_cap_minutes: float = 120.0
     locate_spacing_s: float = 20.0         # minimum gap between any two locate requests
     unanswered_backoff_after: int = 3      # per person: unanswered requests in a row before slowing them
+    session_renew_minutes: float = 14.0    # start a fresh Find My web session this often (Apple's sessionLifespan is 15 min); 0 = never
     with_family: bool = True
 
     # AirTags (FindMy.py)
@@ -107,6 +108,7 @@ EDITABLE = {
     "family_pause_cap_minutes": ("Longest family pause", 15, 480, "min"),
     "locate_spacing_s": ("Minimum gap between any two requests", 5, 300, "s"),
     "unanswered_backoff_after": ("Slow a person down after this many unanswered requests", 1, 20, ""),
+    "session_renew_minutes": ("Renew the Find My session every (0 = never)", 0, 60, "min"),
     "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
     "low_battery_pct": ("Low battery alert below (0 = off)", 0, 100, "%"),
     "stale_hours": ("Stale device alert after (0 = off)", 0, 720, "h"),

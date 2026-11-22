@@ -41,6 +41,7 @@ class Tracker:
         self.follow_started: dict[str, float] = {}
         self.manual_until: dict[str, float] = {}
         self.cap_until: dict[str, float] = {}
+        self.follow_device: dict[str, str] = {}   # the device actually moving: the one fast locates go to
         self.sent_count: dict[str, int] = {}
         self.follows_started = 0
         # answer tracking: did a new fix follow each request? Back off people whose phones don't answer
@@ -306,14 +307,18 @@ class Tracker:
         return False
 
     def on_fixes(self, owner: str, seqs, now: float) -> bool:
-        """Call after new fixes arrive for a person. `seqs` is one oldest-first (ts, lat, lon, acc)
-        list per device; a single list is accepted too. Each device is only compared with its own
-        fixes, so an iPad at home and a phone in a pocket never look like a jump. Starts following
-        when any device moves; stops when a device has a full rest window and none moved in it.
-        Returns True while following because of movement."""
-        if seqs and isinstance(seqs[0], tuple):
-            seqs = [seqs]
-        seqs = [q for q in seqs if q]
+        """Call after new fixes arrive for a person. `seqs` maps device id -> oldest-first
+        (ts, lat, lon, acc) list (a list of lists, or a single list, is accepted too). Each device is
+        only compared with its own fixes, so an iPad at home and a phone in a pocket never look like
+        a jump. Starts following when a device moves and remembers THAT device as the target; hands
+        over if another of the person's devices is the one moving; stops when the moving device has
+        come to rest. Returns True while following because of movement."""
+        if isinstance(seqs, dict):
+            items = [(k, q) for k, q in seqs.items() if q]
+        else:
+            if seqs and isinstance(seqs[0], tuple):
+                seqs = [seqs]
+            items = [(None, q) for q in seqs if q]
         if not self.follow_enabled(owner):
             return False
         window = self.cfg.follow_rest_minutes * 60
@@ -326,23 +331,45 @@ class Tracker:
                 db.log_locate_event("follow_stop", owner, now, reason="cap", minutes=round((now - self.follow_started.get(owner, now)) / 60, 1))
                 return False
             if following:
-                newest = max((q[-1][0] for q in seqs), default=now)
-                moved = any(self.moved_recently(q, newest - window) for q in seqs)
-                if not moved and any(self.at_rest(q) for q in seqs):
+                newest = max((q[-1][0] for _, q in items), default=now)
+                movers = [(q[-1][0], k) for k, q in items if self.moved_recently(q, newest - window)]
+                if movers:
+                    target = max(movers)[1]
+                    if target and target != self.follow_device.get(owner):
+                        db.log_locate_event("follow_handover", owner, now, device=target, previous=self.follow_device.get(owner))
+                        self.follow_device[owner] = target
+                    self.follow_until[owner] = now + window  # expires on its own if fixes stop coming
+                    return True
+                tgt = self.follow_device.get(owner)
+                tgt_seq = next((q for k, q in items if k == tgt), None)
+                if (tgt_seq and self.at_rest(tgt_seq)) or (tgt_seq is None and any(self.at_rest(q) for _, q in items)):
                     self.follow_until[owner] = 0
-                    db.log_locate_event("follow_stop", owner, now, reason="at_rest", minutes=round((now - self.follow_started.get(owner, now)) / 60, 1))
+                    db.log_locate_event("follow_stop", owner, now, reason="at_rest", device=tgt,
+                                        minutes=round((now - self.follow_started.get(owner, now)) / 60, 1))
                     return False
-                self.follow_until[owner] = now + window  # expires on its own if fixes stop coming
+                self.follow_until[owner] = now + window
                 return True
-            if now < self.cap_until.get(owner, 0) or not any(self.moving(q) for q in seqs):
+            if now < self.cap_until.get(owner, 0):
                 return False
+            movers = [(q[-1][0], k) for k, q in items if self.moving(q)]
+            if not movers:
+                return False
+            target = max(movers)[1]
+            self.follow_device[owner] = target
             self.follow_started[owner] = now
             self.follows_started += 1
             self.follow_until[owner] = now + window
-            db.log_locate_event("follow_start", owner, now, reason="moving")
+            db.log_locate_event("follow_start", owner, now, reason="moving", device=target)
             # the first fast locate is due straight away
             self.last_sent[owner] = min(self.last_sent.get(owner, now), now - self.cfg.moving_locate_minutes * 60)
             return True
+
+    def locate_target(self, owner: str, now: float) -> str | None:
+        """Device to locate for this person right now: the moving device while following because of
+        movement; None means 'their main device' (normal schedule or manual follow)."""
+        if self.following(owner, now) == "moving":
+            return self.follow_device.get(owner)
+        return None
 
     def start_manual(self, owner: str, minutes: float, now: float) -> None:
         with self.lock:

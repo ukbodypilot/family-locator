@@ -205,7 +205,9 @@ class ICloudSource:
                         log.warning("no new fix from %s after %d requests in a row; backing off (every %s min)",
                                     owner, st["unanswered_streak"], st["effective_minutes"])
                 for owner in self.tracker.select(self.tracker.due(self._owners(), now), now):
-                    dev = primary_device(owner, now - 86400, now)
+                    tgt = self.tracker.locate_target(owner, now)   # while moving: the device that moves
+                    dev = db.q1("SELECT * FROM devices WHERE id=?", (tgt,)) if tgt else None
+                    dev = dev or primary_device(owner, now - 86400, now)
                     if dev is None or json.loads(dev["meta"] or "{}").get("locationCapable") is False:
                         self.tracker.mark_sent(owner, now, requested=False)  # nothing locatable
                         continue
@@ -213,7 +215,8 @@ class ICloudSource:
                     if info:
                         self.last_locate = now
                         sent = True
-                        self.tracker.record_request(owner, now, device=dev["device_class"])
+                        self.tracker.record_request(owner, now, device=dev["device_class"], device_id=dev["id"],
+                                                    target="moving_device" if tgt else "main_device")
                         self.tracker.record_reply(owner, info.get("isLocating"), now)
                     self.tracker.mark_sent(owner, now, requested=bool(info))
                 if sent:
@@ -222,7 +225,12 @@ class ICloudSource:
                 if now - self.last_read >= self.cfg.poll_seconds or waiting:
                     self.last_poll = now
                     self.counters["polls"] += 1
+                    self._maybe_renew_session(mgr, now)
+                    fresh = mgr._server_ctx is None      # no session state: this read is a fresh initClient
                     mgr.refresh(locate=False)
+                    if fresh:
+                        self._session_started = now
+                        self.counters["sessions"] = self.counters.get("sessions", 0) + 1
                     self._ingest(mgr)
                     self.last_read = now
                     self._family_watchdog(mgr, now)
@@ -298,6 +306,25 @@ class ICloudSource:
         diff = {k: [b.get(k), a.get(k)] for k in set(a) | set(b) if b.get(k) != a.get(k) and "Time" not in k}
         if diff:
             db.log_locate_event("ctx_change", owner, after_locate=True, diff=diff)
+
+    _session_started = 0.0
+
+    def _maybe_renew_session(self, mgr, now: float) -> None:
+        """Apple's web Find My session lasts serverContext.sessionLifespan (15 min). Family members'
+        devices only stay live inside a current session, so start a fresh one (initClient) shortly
+        before it runs out. Never more often than Apple's own lifespan minus a minute allows."""
+        mins = float(self.cfg.session_renew_minutes)
+        if mins <= 0 or not mgr._server_ctx:
+            return
+        if not self._session_started:
+            self._session_started = now  # session predates this code path (e.g. first access at startup)
+            return
+        lifespan_min = (mgr._server_ctx.get("sessionLifespan") or 900000) / 60000
+        mins = max(1.0, min(mins, lifespan_min - 1))
+        if now - self._session_started >= mins * 60:
+            db.log_locate_event("session_renew", None, now, age_s=round(now - self._session_started),
+                                lifespan_min=lifespan_min)
+            mgr._server_ctx = None
 
     def _family_watchdog(self, mgr, now: float) -> None:
         """Our view of family devices froze 15:40-16:03 on 2026-11-21 and a restart (fresh initClient)
@@ -453,7 +480,7 @@ class ICloudSource:
                 "ORDER BY p.ts", (owner, now - win)):
                 seqs.setdefault(r["device_id"], []).append((r["ts"], r["lat"], r["lon"], r["acc"]))
             was = self.tracker.following(owner, now)
-            if self.tracker.on_fixes(owner, list(seqs.values()), now) and not was:
+            if self.tracker.on_fixes(owner, seqs, now) and not was:
                 log.info("following %s while moving", owner)
                 self._wake.set()
 
