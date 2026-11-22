@@ -2,6 +2,17 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.9.0] -- 2026-11-22
+
+See how fast someone is going.
+
+- **Average speed on the person card.** While someone is moving, their map card shows a Speed row,
+  e.g. "62 km/h (39 mph), avg of 3 fixes over 4 min". It's the path length over the last 3 fixes
+  from the device that's with them, or up to 6 fixes when the last 3 span less than 3 minutes.
+  It shows only when the newest fix is under 15 minutes old and they've moved more than 250 m
+  (or more than the fixes' accuracy), so GPS jitter at rest never shows as a speed. Fixes less accurate than 200 m are
+  skipped. Works in timeline playback too.
+
 ## [1.8.0] -- 2026-11-22
 
 Survives reboots and expired Apple sessions without you having to sign in again.
