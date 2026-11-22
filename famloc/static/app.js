@@ -272,14 +272,17 @@ function personPos(p, t = S.t) {
   }
   return best;
 }
-/* The device whose track represents a person in the loaded range. */
+/* The device that represents a person over the loaded range (lanes, Insights): their phone if it has
+   any fixes, else Watch, else iPad. Device type wins over fix count, because an iPad left at home
+   often has MORE fixes than the phone that went out with the person. */
 function primaryOf(p) {
   let best = null;
   for (const d of p.carried) {
     if (!visible(d)) continue;
     const n = (S.data[d.id] || []).length;
-    const score = n * 10 - (CARRY_RANK[kindOf(d)] ?? 3);
-    if (n && (!best || score > best.score)) best = { d, score };
+    if (!n) continue;
+    const key = [-(CARRY_RANK[kindOf(d)] ?? 3), n];
+    if (!best || key[0] > best.key[0] || (key[0] === best.key[0] && key[1] > best.key[1])) best = { d, key };
   }
   return best ? best.d : null;
 }
@@ -539,9 +542,12 @@ function render(full = false) {
   // people: one marker each, merged when together
   const placed = [];
   for (const p of S.people) {
-    const prim = primaryOf(p);
-    if (prim) drawTrack(prim, p.color);
     const st = personStatus(p);
+    // Track the device the marker is placed by, so marker and line always join. Draw the main
+    // device too (faintly) when it's a different one, e.g. an iPad that stayed at home.
+    const prim = primaryOf(p), markDev = st.pos ? st.pos.dev : prim;
+    if (markDev) drawTrack(markDev, p.color);
+    if (prim && markDev && prim.id !== markDev.id) drawTrack(prim, p.color, { weight: 2, opacity: 0.35, dash: "2 6" });
     if (!st.pos) continue;
     const [ts, lat, lon, acc] = st.pos.p;
     if (acc && acc > 15) L.circle([lat, lon], { radius: acc, color: p.color, weight: 1, opacity: 0.5, fillOpacity: 0.07, interactive: false }).addTo(L_acc);
