@@ -1249,11 +1249,12 @@ async function refreshAll() {
   await loadPoints();
 }
 /* playback speed and trail: continuous sliders on a log scale (0-1000).
-   Speed 1 min/s .. 1 week/s; trail 15 min .. 7 days, with the far right end (>= 970) = whole track. */
-const SPEED_MIN = 60, SPEED_MAX = 7 * 86400, TRAIL_MIN = 900, TRAIL_MAX = 7 * 86400, TRAIL_WHOLE = 970;
+   Speed 1 s/s (real time) .. 1 h/s; trail 15 min .. 7 days, with the far right end (>= 970) = whole track. */
+const SPEED_MIN = 1, SPEED_MAX = 3600, TRAIL_MIN = 900, TRAIL_MAX = 7 * 86400, TRAIL_WHOLE = 970;
 const logPos = (v, lo, hi) => lo * Math.pow(hi / lo, v);
 function niceSpan(sec) {
   const r = (x) => (x < 10 ? Math.round(x * 10) / 10 : Math.round(x));
+  if (Math.round(sec) < 60) return `${Math.round(sec)} s`;
   if (Math.round(sec / 60) < 60) return `${Math.round(sec / 60)} min`;
   if (r(sec / 3600) < 24) { const h = r(sec / 3600); return `${h} ${h === 1 ? "hour" : "hours"}`; }
   const d = r(sec / 86400); return `${d} ${d === 1 ? "day" : "days"}`;
@@ -1269,8 +1270,8 @@ function syncSliders() {
     el.style.setProperty("--fill", Number(el.value) / 10 + "%");
   }
 }
-$("#speed").value = store.get("speedPos", 444); $("#trail").value = store.get("trailPos", 1000); syncSliders();
-$("#speed").oninput = () => { store.set("speedPos", Number($("#speed").value)); syncSliders(); };
+$("#speed").value = store.get("speedPos2", 781); $("#trail").value = store.get("trailPos", 1000); syncSliders();
+$("#speed").oninput = () => { store.set("speedPos2", Number($("#speed").value)); syncSliders(); };
 $("#trail").oninput = () => { store.set("trailPos", Number($("#trail").value)); syncSliders(); schedRender(); };
 
 function handleHash() {

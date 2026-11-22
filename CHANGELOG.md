@@ -7,7 +7,7 @@ All notable changes to Family Locator. The version is the git tag.
 - **Clicking a person's marker** (or a group of people) on the map centres the map on them,
   keeping the zoom, and opens their card there.
 - **Timeline:** playback speed and trail length are continuous log-scale sliders, not drop-downs
-  (speed 1 min to 1 week per second; trail 15 min to 7 days, or whole track), remembered per
+  (speed 1 s to 1 hour per second, default 10 min; trail 15 min to 7 days, or whole track), remembered per
   browser and shown on phones too. Lanes are taller (28 px, 20 px on phones) with more room
   around them.
 - **Show or hide people and devices on the map.** An eye button on each person and device, **Show
