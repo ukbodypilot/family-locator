@@ -51,6 +51,7 @@ class Tracker:
         self.unanswered: dict[str, int] = {}
         self.self_owner: str | None = None   # the signed-in Apple ID's own name (exempt from the family budget)
         g = db.get_setting("locate_governor", {}) or {}
+        self._blocked: dict[str, str] = {}   # person -> last logged block reason (log changes only)
         self.gov = {"history": [tuple(x) for x in g.get("history", [])], "until": float(g.get("until", 0)),
                     "level": int(g.get("level", 0)), "false_streak": int(g.get("false_streak", 0)),
                     "reason": g.get("reason", "")}
@@ -114,14 +115,21 @@ class Tracker:
         factor = self.backoff_factor(owner)
         return base if factor == 1 else max(base, min(base * factor, self.BACKOFF_CAP_MIN))
 
-    def note_fix(self, owner: str, fix_ts: float) -> None:
-        """A new fix arrived for this person: it answers any request sent shortly before it."""
+    def note_fix(self, owner: str, fix_ts: float, device_kind: str | None = None) -> None:
+        """A new fix arrived for this person: it answers any request sent shortly before it.
+        Fixes with no request pending are logged as 'fix' (the phone reported by itself)."""
         with self.lock:
             t = self.pending.get(owner)
-            if t is not None and fix_ts >= t - 30:
+            if t is not None and t - 30 <= fix_ts <= t + self.ANSWER_WINDOW_S:
                 self.pending.pop(owner, None)
                 self.answered[owner] = self.answered.get(owner, 0) + 1
+                was = self.streak.get(owner, 0)
                 self.streak[owner] = 0
+                db.log_locate_event("answer", owner, latency_s=round(fix_ts - t, 1), kind=device_kind,
+                                    self_owner=self.is_self(owner), cleared_streak=was)
+            else:
+                db.log_locate_event("fix", owner, kind=device_kind, self_owner=self.is_self(owner),
+                                    since_last_request_s=round(fix_ts - self.last_sent[owner], 1) if owner in self.last_sent else None)
 
     def check_timeouts(self, now: float) -> list[str]:
         """Requests with no new fix within ANSWER_WINDOW_S count as unanswered. Returns those owners."""
@@ -131,8 +139,13 @@ class Tracker:
                 if now - t > self.ANSWER_WINDOW_S:
                     self.pending.pop(o, None)
                     self.unanswered[o] = self.unanswered.get(o, 0) + 1
+                    before = self.backoff_factor(o)
                     self.streak[o] = self.streak.get(o, 0) + 1
                     out.append(o)
+                    db.log_locate_event("unanswered", o, streak=self.streak[o], self_owner=self.is_self(o))
+                    if self.backoff_factor(o) != before:
+                        db.log_locate_event("backoff", o, factor=self.backoff_factor(o), streak=self.streak[o],
+                                            interval_min=self.interval_minutes(o, now))
         return out
 
     def due(self, owners: list[str], now: float) -> list[str]:
@@ -188,17 +201,37 @@ class Tracker:
             rank = {"manual": 0, "moving": 1, None: 2}
             for o in sorted(due, key=lambda o: (rank[self.following(o, now)], self.last_sent.get(o, 0))):
                 if self.is_self(o):
+                    self._unblock(o, now)
                     return [o]
-                if self.family_paused(now) or self.family_used(now) >= self.cfg.family_locates_per_hour:
+                if self.family_paused(now):
+                    self._block(o, "paused", now, until=self.gov["until"], level=self.gov["level"])
                     continue
+                if self.family_used(now) >= self.cfg.family_locates_per_hour:
+                    self._block(o, "budget", now, used=self.family_used(now), budget=self.cfg.family_locates_per_hour)
+                    continue
+                self._unblock(o, now)
                 return [o]
             return []
 
-    def record_request(self, owner: str, now: float) -> None:
+    def _block(self, o: str, reason: str, now: float, **data) -> None:
+        if self._blocked.get(o) != reason:
+            self._blocked[o] = reason
+            db.log_locate_event("blocked", o, now, reason=reason, following=self.following(o, now), **data)
+
+    def _unblock(self, o: str, now: float) -> None:
+        if self._blocked.pop(o, None):
+            db.log_locate_event("unblocked", o, now)
+
+    def record_request(self, owner: str, now: float, why: str | None = None, **data) -> None:
         with self.lock:
             self._prune(now)
+            probe = not self.is_self(owner) and owner != "ALL" and self.gov["level"] > 0
             self.gov["history"].append((now, owner))
             self._save_gov()
+            db.log_locate_event("request", owner, now, why=why or ("probe" if probe else self.following(owner, now) or "schedule"),
+                                probe=probe, interval_min=self.interval_minutes(owner, now) if owner != "ALL" else None,
+                                family_used=self.family_used(now), budget=self.cfg.family_locates_per_hour,
+                                pause_level=self.gov["level"], self_owner=self.is_self(owner), **data)
 
     def record_reply(self, owner: str | None, is_locating, now: float) -> None:
         """Apple's isLocating on a family member's request is the throttle signal: false N times in a
@@ -209,14 +242,19 @@ class Tracker:
         with self.lock:
             g = self.gov
             if is_locating:
+                if g["level"] > 0 or g["until"] > now:
+                    db.log_locate_event("resume", owner, now, was_level=g["level"])
                 g.update(false_streak=0, level=0, until=0.0, reason="")
             else:
                 g["false_streak"] += 1
                 if g["false_streak"] >= self.THROTTLE_AFTER or g["level"] > 0:
+                    trigger = "probe_failed" if g["level"] > 0 else f"{g['false_streak']}_false_in_a_row"
                     g["level"] = min(g["level"] + 1, 6)
                     mins = min(self.cfg.family_pause_minutes * 2 ** (g["level"] - 1), self.PAUSE_CAP_MIN)
                     g["until"] = now + mins * 60
                     g["reason"] = f"Apple didn't act on the last {g['false_streak'] or 1} family request(s)"
+                    db.log_locate_event("pause", owner, now, level=g["level"], minutes=mins, trigger=trigger,
+                                        family_used=self.family_used(now))
                     g["false_streak"] = 0
             self._save_gov()
 
@@ -285,12 +323,14 @@ class Tracker:
                 # runaway guard (e.g. noisy fixes): stop, and don't restart for an hour
                 self.follow_until[owner] = 0
                 self.cap_until[owner] = now + 3600
+                db.log_locate_event("follow_stop", owner, now, reason="cap", minutes=round((now - self.follow_started.get(owner, now)) / 60, 1))
                 return False
             if following:
                 newest = max((q[-1][0] for q in seqs), default=now)
                 moved = any(self.moved_recently(q, newest - window) for q in seqs)
                 if not moved and any(self.at_rest(q) for q in seqs):
                     self.follow_until[owner] = 0
+                    db.log_locate_event("follow_stop", owner, now, reason="at_rest", minutes=round((now - self.follow_started.get(owner, now)) / 60, 1))
                     return False
                 self.follow_until[owner] = now + window  # expires on its own if fixes stop coming
                 return True
@@ -299,6 +339,7 @@ class Tracker:
             self.follow_started[owner] = now
             self.follows_started += 1
             self.follow_until[owner] = now + window
+            db.log_locate_event("follow_start", owner, now, reason="moving")
             # the first fast locate is due straight away
             self.last_sent[owner] = min(self.last_sent.get(owner, now), now - self.cfg.moving_locate_minutes * 60)
             return True
@@ -308,8 +349,10 @@ class Tracker:
             if minutes <= 0:
                 self.manual_until.pop(owner, None)
                 self.follow_until[owner] = 0
+                db.log_locate_event("follow_stop", owner, now, reason="manual_stop")
             else:
                 self.manual_until[owner] = now + minutes * 60
+                db.log_locate_event("follow_start", owner, now, reason="manual", minutes=minutes)
                 self.last_sent[owner] = now - self.cfg.moving_locate_minutes * 60  # locate right away
 
     def status(self, owner: str, now: float) -> dict:

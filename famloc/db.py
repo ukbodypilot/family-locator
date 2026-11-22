@@ -82,6 +82,14 @@ CREATE TABLE IF NOT EXISTS web_sessions (
     token   TEXT PRIMARY KEY,
     expires REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS locate_events (
+    id      INTEGER PRIMARY KEY,
+    ts      REAL NOT NULL,
+    event   TEXT NOT NULL,     -- request / reply / answer / fix / unanswered / backoff / pause / resume / blocked / follow_start / follow_stop
+    person  TEXT,
+    data    TEXT               -- json
+);
+CREATE INDEX IF NOT EXISTS locate_events_ts ON locate_events(ts);
 CREATE TABLE IF NOT EXISTS geocode_cache (
     q       TEXT PRIMARY KEY,
     ts      REAL NOT NULL,
@@ -210,3 +218,13 @@ def person_display(owner: str | None) -> str | None:
     if not owner:
         return owner
     return (get_setting("person_names", {}) or {}).get(owner) or owner
+
+
+def log_locate_event(event: str, person: str | None, ts: float | None = None, **data) -> None:
+    """Durable record of the locate governor's decisions and Apple's replies, for tuning from data.
+    (The system journal on this box is in RAM.) Kept 30 days; see tools/locate_report.py."""
+    try:
+        x("INSERT INTO locate_events(ts,event,person,data) VALUES(?,?,?,?)",
+          (ts or time.time(), event, person, json.dumps(data, default=str) if data else None))
+    except sqlite3.Error:
+        pass

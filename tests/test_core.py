@@ -339,6 +339,17 @@ def test_governor_survives_restart():
     db.set_setting("locate_governor", {})
 
 
+def test_late_fix_is_not_an_answer():
+    t = _gov_tracker()
+    t.mark_sent("Kid", 1000.0)
+    t.note_fix("Kid", 1000.0 + 400, "iPhone")        # 400 s later: outside the 3-minute window
+    assert t.answered.get("Kid", 0) == 0
+    t.note_fix("Kid", 1000.0 + 60, "iPhone")         # 60 s: an answer
+    assert t.answered["Kid"] == 1
+    ev = [r["event"] for r in db.q("SELECT event FROM locate_events WHERE person='Kid' ORDER BY id")]
+    assert ev[-2:] == ["fix", "answer"], ev
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

@@ -197,7 +197,7 @@ class ICloudSource:
                     if info:
                         self.last_locate = now
                         sent = True
-                        self.tracker.record_request(owner, now)
+                        self.tracker.record_request(owner, now, device=dev["device_class"])
                         self.tracker.record_reply(owner, info.get("isLocating"), now)
                     self.tracker.mark_sent(owner, now, requested=bool(info))
                 if sent:
@@ -248,6 +248,10 @@ class ICloudSource:
                 "isLocating": mine.get("isLocating"), "fix_age_s": round(time.time() - loc["timeStamp"] / 1000) if loc.get("timeStamp") else None,
                 "deviceStatus": mine.get("deviceStatus")}
         self.locate_log = (getattr(self, "locate_log", []) + [info])[-40:]
+        db.log_locate_event("reply", owner, info["t"], http=info["http"], statusCode=info["statusCode"],
+                            isLocating=info["isLocating"], fix_age_s=info["fix_age_s"],
+                            deviceStatus=info["deviceStatus"], devices_in_reply=info["devices_in_reply"],
+                            self_owner=self.tracker.is_self(owner))
         bad = info["http"] not in (200, None) or (info["statusCode"] not in (None, "200", 200))
         (log.warning if bad else log.info)("locate %s: http=%s statusCode=%s isLocating=%s fix_age=%ss devices_in_reply=%s",
                                            owner, info["http"], info["statusCode"], info["isLocating"],
@@ -265,7 +269,7 @@ class ICloudSource:
             self.counters["polls"] += 1
             locate = bool(force_locate)
             if locate:
-                self.tracker.record_request("ALL", time.time())
+                self.tracker.record_request("ALL", time.time(), why="locate_everyone")
             try:
                 mgr = self.api.devices  # first access does initClient
                 mgr.refresh(locate=locate)
@@ -307,7 +311,7 @@ class ICloudSource:
             owner = row["owner"] if row else None
             info = self._request_locate(mgr, dev_id, owner)
             if info:
-                self.tracker.record_request(owner or dev_id, time.time())
+                self.tracker.record_request(owner or dev_id, time.time(), why="manual_locate")
                 self.tracker.record_reply(owner, info.get("isLocating"), time.time())
             after, waited = before, 0
             while waited < 36:
@@ -362,7 +366,7 @@ class ICloudSource:
                 self.alerter.check_fix(row, ts, lat, lon, acc)
                 if owner and any(k in (d.get("deviceClass") or "") for k in ("iPhone", "Watch", "iPad")):
                     new_owners.add(owner)
-                    self.tracker.note_fix(owner, ts)
+                    self.tracker.note_fix(owner, ts, d.get("deviceClass"))
         self.counters["devices"] = n
         self._check_movement(new_owners)
         # Raw response kept for inspection (owner mapping, new fields). Local, 0600.

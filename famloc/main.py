@@ -22,6 +22,7 @@ def _housekeeping(alerter: Alerter, stop: threading.Event) -> None:
     while True:
         try:
             alerter.check_stale()
+            db.x("DELETE FROM locate_events WHERE ts < ?", (time.time() - 30 * 86400,))
             last = (db.get_setting("last_backup") or {}).get("ts", 0)
             if time.time() - last > 23 * 3600:
                 log.info("backup written: %s", db.backup())

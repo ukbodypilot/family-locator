@@ -326,6 +326,13 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         icloud.poll_once(force_locate=locate)
         return icloud.status()
 
+    @app.get("/api/icloud/locate-events")
+    def locate_events(since: float = 0, limit: int = 5000):
+        rows = db.q("SELECT ts, event, person, data FROM locate_events WHERE ts>=? ORDER BY ts LIMIT ?", (since, limit))
+        for r in rows:
+            r["data"] = json.loads(r["data"]) if r["data"] else {}
+        return rows
+
     @app.get("/api/icloud/locate-log")
     def locate_log():
         return getattr(icloud, "locate_log", [])
