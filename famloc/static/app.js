@@ -588,6 +588,8 @@ addEventListener("resize", () => drawLanes());
 let rafPending = false;
 function schedRender() { if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; render(); }); } }
 
+/* clicking a person's marker centres the map on them (zoom unchanged); the popup opens there */
+function centreOn(e) { map.panTo(e.target.getLatLng(), { animate: !reduceMotion, duration: 0.4 }); }
 function render(full = false) {
   const span = S.end - S.start || 1;
   scrub.value = Math.round(((S.t - S.start) / span) * 1000);
@@ -640,13 +642,13 @@ function render(full = false) {
       const { p, st, lat, lon } = G.members[0];
       const ic = L.divIcon({ className: "pmark" + (st.stale ? " stale" : ""), iconSize: [34, 34], iconAnchor: [17, 17],
         html: `<div class="av" style="background:${p.color}">${esc(initials(p.display))}</div><div class="lbl">${esc(firstName(p.display))}</div>` });
-      L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.display, keyboard: true }).bindPopup(() => personPopup(p)).addTo(L_people);
+      L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.display, keyboard: true }).bindPopup(() => personPopup(p), { autoPan: false }).on("click", centreOn).addTo(L_people);
     } else {
       if (G.place && G.members.some((m) => !m.st.place || m.st.place.id !== G.place.id)) G.place = null;
       const avs = G.members.map(({ p }) => `<div class="av" style="background:${p.color}" title="${esc(p.display)}">${esc(initials(p.display))}</div>`).join("");
       const ic = L.divIcon({ className: "", iconSize: null, html: `<div class="gmark">${avs}${G.place ? `<span class="place-name">${esc(G.place.name)}</span>` : ""}</div>` });
       const names = G.members.map(({ p }) => firstName(p.display)).join(", ");
-      L.marker([G.lat, G.lon], { icon: ic, zIndexOffset: 1000, title: names }).bindPopup(() => groupPopup(G)).addTo(L_people);
+      L.marker([G.lat, G.lon], { icon: ic, zIndexOffset: 1000, title: names }).bindPopup(() => groupPopup(G), { autoPan: false }).on("click", centreOn).addTo(L_people);
     }
   }
   // items (AirTags etc.)

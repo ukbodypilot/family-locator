@@ -65,7 +65,8 @@ else sees, unlike **Hide this device**, which hides a device for everyone.
 - **People together share a marker.** Everyone at the same saved place, or close enough that
   their markers would overlap, appears as a single pill, for example "(A)(S) *Home*". Click it to
   see who's there.
-- **Click a marker** for details and actions: Locate now, Insights, What's here?, Make this a
+- **Click a marker** to centre the map on that person (the zoom stays) and open their details and
+  actions: Locate now, Insights, What's here?, Make this a
   place, and Directions.
 - **Right-click anywhere** for What's here?, Create place here, Copy coordinates and Centre the
   map here.
