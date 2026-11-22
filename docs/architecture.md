@@ -70,10 +70,13 @@ report the result. **Locate everyone now** sends one all-devices locate.
 
 All of this is client-side in `app.js`:
 
-- **Position:** the freshest fix among the person's carried devices (iPhone, Watch, iPad) at the
-  cursor time. An iPhone wins ties within 15 minutes.
-- **Main device:** for tracks, lanes and Insights, the carried device with the most fixes in the
-  range.
+- **Position:** each carried device's (iPhone, Watch, iPad) latest fix at the cursor time, within 30
+  minutes of the freshest. If they agree (within 300 m / their accuracy), the phone, then Watch,
+  then iPad. If they disagree, the device whose own fixes moved most recently, so a device left
+  behind never takes the marker.
+- **Track and lanes** use the same device as the marker at each moment (`markerSeq`), so they always
+  join. The person's main device (phone first, then Watch, then iPad) is drawn faintly when it's
+  a different one, and used for Insights.
 - **Lane colour:** each fix gets *inside place X*; or *moving* (more than 250 m from a neighbouring
   fix within 45 minutes); or *elsewhere*. Runs stop at gaps longer than 3 hours.
 - **Merged markers:** people merge when they're at the same place, or their markers would overlap

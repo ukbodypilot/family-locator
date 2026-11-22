@@ -10,8 +10,11 @@ The screen has four parts: the **panel** on the left (a sheet at the bottom on a
 Each person in your Family Sharing group has a row:
 
 - **Status.** "At *Home* since 07:13", "On the move", "Not at a saved place" or "No location yet".
-  It's worked out from the person's freshest phone, watch or iPad fix. An iPhone wins over a watch
-  when both reported within 15 minutes of each other.
+  It's worked out from whichever of their phone, Watch or iPad is actually with them. When their
+  devices agree, the phone is used. When they're reporting from clearly different places (more than
+  300 m apart), the device that moved most recently is taken to be with the person, e.g. a Watch
+  that left home rather than a phone left behind. The marker, track and timeline lane all use the
+  same device.
 - **How old the fix is,** and the battery of the device that reported it. A lightning bolt in the
   battery means it's charging; red means 20% or less.
 - **Show devices.** Lists everything the person owns. Devices Apple has no location for, such as

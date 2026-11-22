@@ -260,17 +260,41 @@ function idxAt(arr, t) {
 function lastAt(id, t) { const a = S.data[id]; if (!a || !a.length) return null; const i = idxAt(a, t); return i >= 0 ? a[i] : null; }
 const lastOf = (d) => (d.last ? [d.last.ts, d.last.lat, d.last.lon, d.last.acc, d.battery] : null);
 
-/* Where is a person at time t? Freshest carried-device fix; an iPhone wins ties within 15 min. */
+/* Times each device clearly moved (consecutive own fixes > 250 m apart, beyond their accuracy),
+   rebuilt when data loads. Used to tell which device is with the person when they disagree. */
+let MOVES = {};
+function buildMoves() {
+  MOVES = {};
+  for (const [id, a] of Object.entries(S.data)) {
+    const m = [];
+    for (let i = 1; i < a.length; i++) {
+      const p0 = a[i - 1], p1 = a[i];
+      if (p1[0] - p0[0] <= 35 * 60 && haversine(p0[1], p0[2], p1[1], p1[2]) > Math.max(250, (p0[3] || 0) + (p1[3] || 0))) m.push(p1[0]);
+    }
+    MOVES[id] = m;
+  }
+}
+function lastMoveAt(id, t) { const m = MOVES[id]; if (!m || !m.length) return -Infinity; let lo = 0, hi = m.length - 1, r = -Infinity; while (lo <= hi) { const k = (lo + hi) >> 1; if (m[k] <= t) { r = m[k]; lo = k + 1; } else hi = k - 1; } return r; }
+
+/* Where is a person at time t? Candidates: each carried device's latest fix (within 30 min of the
+   freshest). If they agree (within 300 m / their accuracy), the phone wins, then Watch, then iPad.
+   If they're in clearly different places, the device that moved most recently is the one with the
+   person, e.g. the Watch that left home, not the phone that stayed there. */
 function personPos(p, t = S.t) {
-  let best = null;
+  const cands = [];
   for (const d of p.carried) {
     if (!visible(d)) continue;
     const pt = lastAt(d.id, t) || (S.follow && d.last && d.last.ts <= t + 60 ? lastOf(d) : null);
-    if (!pt) continue;
-    const c = { dev: d, p: pt, rank: CARRY_RANK[kindOf(d)] ?? 3 };
-    if (!best || pt[0] > best.p[0] + 15 * 60 || (Math.abs(pt[0] - best.p[0]) <= 15 * 60 && c.rank < best.rank)) best = c;
+    if (pt) cands.push({ dev: d, p: pt, rank: CARRY_RANK[kindOf(d)] ?? 3 });
   }
-  return best;
+  if (!cands.length) return null;
+  const freshest = Math.max(...cands.map((c) => c.p[0]));
+  const live = cands.filter((c) => c.p[0] >= freshest - 30 * 60);
+  const byRank = (a, b) => a.rank - b.rank || b.p[0] - a.p[0];
+  const ref = live.slice().sort(byRank)[0];
+  const apart = live.some((c) => haversine(c.p[1], c.p[2], ref.p[1], ref.p[2]) > Math.max(300, (c.p[3] || 0) + (ref.p[3] || 0)));
+  if (!apart) return ref;
+  return live.sort((a, b) => lastMoveAt(b.dev.id, t) - lastMoveAt(a.dev.id, t) || byRank(a, b))[0];
 }
 /* The device that represents a person over the loaded range (lanes, Insights): their phone if it has
    any fixes, else Watch, else iPad. Device type wins over fix count, because an iPad left at home
@@ -396,6 +420,7 @@ async function loadPoints() {
   $("#tFrom").value = toLocalInput(S.start); $("#tTo").value = toLocalInput(S.end);
   const res = await api(`/api/points?start=${S.start}&end=${S.end}`);
   S.data = res.points;
+  buildMoves();
   if (res.truncated) toast("This range has more than 200,000 fixes, so only the first 200,000 are shown. Choose a shorter range.", 6000);
   computeRuns(); drawLanes(); buildPhotos(); render(true);
   if (S.firstFit) { S.firstFit = false; requestAnimationFrame(() => { map.invalidateSize(); fitAll(); }); }
@@ -410,10 +435,25 @@ function fitAll() {
 /* ---------------- timeline lanes ---------------- */
 function laneH() { return isPhone() ? 12 : 16; }
 const LANE_TOP = 14;
+/* A person's path as the marker sees it: every carried-device fix that would have been the marker
+   position at its own moment (phone by default; Watch/iPad only when clearly fresher). This makes
+   the lanes follow whichever device is actually with the person, e.g. a Watch when the phone stayed home. */
+function markerSeq(p) {
+  const all = [];
+  for (const d of p.carried) {
+    if (!visible(d)) continue;
+    for (const pt of S.data[d.id] || []) all.push([pt, d]);
+  }
+  all.sort((x, y) => x[0][0] - y[0][0]);
+  const saved = S.follow; S.follow = false;   // judge each moment from stored fixes only
+  try {
+    return all.filter(([pt, d]) => { const pos = personPos(p, pt[0]); return pos && pos.dev.id === d.id; }).map(([pt]) => pt);
+  } finally { S.follow = saved; }
+}
 function computeRuns() {
   S.runs = S.people.map((p) => {
     const d = primaryOf(p);
-    const a = d ? S.data[d.id] || [] : [];
+    const a = markerSeq(p);
     const states = a.map((pt, i) => {
       const g = fenceAt(pt[1], pt[2]);
       if (g) return "f" + g.id;
