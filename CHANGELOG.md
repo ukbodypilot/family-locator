@@ -2,7 +2,9 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
-## [Unreleased]
+## [1.11.0] -- 2026-11-22
+
+Usable on a phone, the map follows who you click, and tracks are coloured by speed.
 
 - **Usable on a phone.** On a narrow screen the timeline folds down to one row (range buttons and
   play), and a chevron opens the speed and trail sliders and the lanes; the choice is remembered.
