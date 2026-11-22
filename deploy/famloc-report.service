@@ -1,0 +1,7 @@
+[Unit]
+Description=Family Locator tuning report email
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Downloads/family-locator
+ExecStart=%h/Downloads/family-locator/.venv/bin/python tools/email_report.py --until "2026-11-21 23:00" --since 16:25
