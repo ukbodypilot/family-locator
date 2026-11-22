@@ -29,6 +29,8 @@ class Config:
     follow_rest_minutes: float = 10.0  # "stopped" = no movement for this long
     follow_max_hours: float = 4.0      # safety cap on one follow
     movement_threshold_m: float = 250.0
+    family_locates_per_hour: int = 20     # budget for fresh-location requests to family members' devices
+    family_pause_minutes: float = 15.0     # first family-wide pause when Apple stops acting on requests
     with_family: bool = True
 
     # AirTags (FindMy.py)
@@ -95,6 +97,8 @@ EDITABLE = {
     "follow_rest_minutes": ("Stop following after no movement for", 3, 60, "min"),
     "follow_max_hours": ("Never follow one trip longer than", 0.5, 24, "h"),
     "movement_threshold_m": ("Counts as moving beyond", 100, 2000, "m"),
+    "family_locates_per_hour": ("Family budget: fresh locations per hour, all members together", 2, 120, ""),
+    "family_pause_minutes": ("Pause family requests when Apple stops acting on them, for", 5, 120, "min"),
     "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
     "low_battery_pct": ("Low battery alert below (0 = off)", 0, 100, "%"),
     "stale_hours": ("Stale device alert after (0 = off)", 0, 720, "h"),

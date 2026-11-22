@@ -1068,7 +1068,7 @@ async function loadEvents() {
   $("#eventList").onclick = (ev2) => { const b = ev2.target.closest("[data-focus]"); if (b) { location.hash = "focus=" + b.dataset.focus; } };
 }
 const ALERT_KEYS = ["quiet_from_hour", "quiet_to_hour", "digest_hour", "low_battery_pct", "stale_hours", "geofence_exit_margin_m", "max_alert_accuracy_m"];
-const TRACK_KEYS = ["locate_minutes", "follow_moving", "moving_locate_minutes", "follow_rest_minutes", "follow_max_hours", "movement_threshold_m", "poll_seconds", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];
+const TRACK_KEYS = ["locate_minutes", "follow_moving", "moving_locate_minutes", "follow_rest_minutes", "follow_max_hours", "movement_threshold_m", "family_locates_per_hour", "family_pause_minutes", "poll_seconds", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];
 async function loadConfigForms() {
   const rows = await api("/api/config");
   const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
@@ -1121,6 +1121,10 @@ async function loadStatus() {
   $("#storageLine").textContent = `${st.storage.points.toLocaleString()} fixes saved on disk in ${st.storage.db}. ` + (bk ? `Last daily backup ${ago(bk.ts)} (${(bk.bytes / 1024).toFixed(0)} KB); 14 are kept.` : "The first backup hasn't run yet.");
   $("#cfgLine").textContent = `Version ${st.version}.`;
   addKeyedLayers(st.tile_keys);
+  const fr = st.family_requests;
+  if (fr) $("#familyBudget").innerHTML = fr.paused_until
+    ? `<b style="color:var(--amber)">Family requests paused until ${esc(clock(fr.paused_until))}.</b> ${esc(fr.reason)}; it tries one again then. Your own devices aren't affected.`
+    : `Family requests this hour: ${fr.used_last_hour} of ${fr.budget}${fr.self ? ` (${esc(firstName(ownerName(fr.self)))}'s own devices don't count)` : ""}.`;
   const L1 = st.links || {};
   $("#pubLink").innerHTML = L1.public ? `<a href="${esc(L1.public)}" target="_blank" rel="noopener">${esc(L1.public)}</a> <button class="name-it" id="copyPub">Copy</button>` : "The gateway's tunnel isn't running, so there's no outside link right now.";
   $("#lanLink").innerHTML = L1.lan ? `At home: <a href="${esc(L1.lan)}">${esc(L1.lan)}</a>` : "";

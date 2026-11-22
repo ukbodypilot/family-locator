@@ -1,9 +1,16 @@
-"""Per-person locate scheduling with a "follow while moving" mode.
+"""Per-person locate scheduling with a "follow while moving" mode, under a family-wide governor.
 
 Each person (device owner) gets fresh-fix requests on their own interval: their override if set,
 else the global `locate_minutes`. When their fixes show movement, they're *followed*: located
 every `moving_locate_minutes` until they've stayed put for `follow_rest_minutes`, with a hard cap
 of `follow_max_hours`. A manual "follow for N minutes" overrides everything.
+
+A family-wide governor sits on top: Apple appears to limit active locates of *other family members'*
+devices per account, not per device. So all requests to family members share one hourly budget,
+any two requests are at least 20 s apart, and when Apple stops acting on them (replies with
+isLocating=false) all family requests pause, then probe, with the pause doubling each time. The
+account holder's own devices are exempt from the budget and pauses. Governor state is saved in the
+database so a restart can't reset it.
 
 Pure logic plus settings reads; no Apple calls here, so it's unit-tested directly.
 """
@@ -42,6 +49,11 @@ class Tracker:
         self.streak: dict[str, int] = {}
         self.answered: dict[str, int] = {}
         self.unanswered: dict[str, int] = {}
+        self.self_owner: str | None = None   # the signed-in Apple ID's own name (exempt from the family budget)
+        g = db.get_setting("locate_governor", {}) or {}
+        self.gov = {"history": [tuple(x) for x in g.get("history", [])], "until": float(g.get("until", 0)),
+                    "level": int(g.get("level", 0)), "false_streak": int(g.get("false_streak", 0)),
+                    "reason": g.get("reason", "")}
 
     # ------------------------------------------------------------ settings
     @staticmethod
@@ -143,6 +155,77 @@ class Tracker:
             if requested:
                 self.pending.setdefault(owner, now)
             self.sent_count[owner] = self.sent_count.get(owner, 0) + 1
+
+    # ------------------------------------------------------------ family governor
+    MIN_SPACING_S = 20
+    THROTTLE_AFTER = 3     # family replies in a row with isLocating=false before pausing
+    PAUSE_CAP_MIN = 120
+
+    def _save_gov(self) -> None:
+        db.set_setting("locate_governor", {**self.gov, "history": [list(x) for x in self.gov["history"]]})
+
+    def is_self(self, owner: str | None) -> bool:
+        return bool(owner) and owner == self.self_owner
+
+    def _prune(self, now: float) -> None:
+        self.gov["history"] = [h for h in self.gov["history"] if now - h[0] < 3600]
+
+    def family_used(self, now: float) -> int:
+        return sum(1 for t, o in self.gov["history"] if now - t < 3600 and not self.is_self(o))
+
+    def family_paused(self, now: float) -> bool:
+        return self.gov["until"] > now
+
+    def select(self, due: list[str], now: float) -> list[str]:
+        """From the people who are due, pick at most one to locate now: spacing first, then the
+        account holder (exempt), then family members within the budget and outside any pause,
+        manual follows before movement before normal schedules, longest-waiting first."""
+        with self.lock:
+            self._prune(now)
+            last_any = max((t for t, _ in self.gov["history"]), default=0)
+            if now - last_any < self.MIN_SPACING_S:
+                return []
+            rank = {"manual": 0, "moving": 1, None: 2}
+            for o in sorted(due, key=lambda o: (rank[self.following(o, now)], self.last_sent.get(o, 0))):
+                if self.is_self(o):
+                    return [o]
+                if self.family_paused(now) or self.family_used(now) >= self.cfg.family_locates_per_hour:
+                    continue
+                return [o]
+            return []
+
+    def record_request(self, owner: str, now: float) -> None:
+        with self.lock:
+            self._prune(now)
+            self.gov["history"].append((now, owner))
+            self._save_gov()
+
+    def record_reply(self, owner: str | None, is_locating, now: float) -> None:
+        """Apple's isLocating on a family member's request is the throttle signal: false N times in a
+        row pauses all family requests; any false reply while recovering (the probe) doubles the
+        pause; a true reply clears everything."""
+        if self.is_self(owner) or is_locating is None or owner == "ALL":
+            return
+        with self.lock:
+            g = self.gov
+            if is_locating:
+                g.update(false_streak=0, level=0, until=0.0, reason="")
+            else:
+                g["false_streak"] += 1
+                if g["false_streak"] >= self.THROTTLE_AFTER or g["level"] > 0:
+                    g["level"] = min(g["level"] + 1, 6)
+                    mins = min(self.cfg.family_pause_minutes * 2 ** (g["level"] - 1), self.PAUSE_CAP_MIN)
+                    g["until"] = now + mins * 60
+                    g["reason"] = f"Apple didn't act on the last {g['false_streak'] or 1} family request(s)"
+                    g["false_streak"] = 0
+            self._save_gov()
+
+    def family_status(self, now: float) -> dict:
+        g = self.gov
+        return {"budget": self.cfg.family_locates_per_hour, "used_last_hour": self.family_used(now),
+                "paused_until": g["until"] if g["until"] > now else None, "pause_level": g["level"],
+                "reason": g["reason"] if g["until"] > now else "", "false_streak": g["false_streak"],
+                "self": self.self_owner}
 
     def next_due(self, owner: str, now: float) -> float | None:
         iv = self.interval_minutes(owner, now)

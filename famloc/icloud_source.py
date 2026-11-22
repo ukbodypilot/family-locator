@@ -188,16 +188,18 @@ class ICloudSource:
                     if st["unanswered_streak"] == self.tracker.BACKOFF_AFTER:
                         log.warning("no new fix from %s after %d requests in a row; backing off (every %s min)",
                                     owner, st["unanswered_streak"], st["effective_minutes"])
-                for owner in self.tracker.due(self._owners(), now):
+                for owner in self.tracker.select(self.tracker.due(self._owners(), now), now):
                     dev = primary_device(owner, now - 86400, now)
                     if dev is None or json.loads(dev["meta"] or "{}").get("locationCapable") is False:
                         self.tracker.mark_sent(owner, now, requested=False)  # nothing locatable
                         continue
-                    ok = self._request_locate(mgr, dev["id"], owner)
-                    if ok:
+                    info = self._request_locate(mgr, dev["id"], owner)
+                    if info:
                         self.last_locate = now
                         sent = True
-                    self.tracker.mark_sent(owner, now, requested=ok)
+                        self.tracker.record_request(owner, now)
+                        self.tracker.record_reply(owner, info.get("isLocating"), now)
+                    self.tracker.mark_sent(owner, now, requested=bool(info))
                 if sent:
                     self.pending_until = now + 50  # answers take ~5-30 s
                 waiting = self.pending_until > now and now - self.last_read >= 10
@@ -218,13 +220,13 @@ class ICloudSource:
                 self.state_detail = f"poll error: {type(e).__name__}: {e}"
                 log.warning("tick error: %s", traceback.format_exc())
 
-    def _request_locate(self, mgr, dev_id: str, owner: str | None = None) -> bool:
+    def _request_locate(self, mgr, dev_id: str, owner: str | None = None) -> dict | None:
         """Send Find My's single-device locate (selectedDevice) and return straight away.
         Apple's reply is summarised in self.locate_log (newest last) for diagnosis."""
         from pyicloud.services.findmyiphone import _FMIP_CLIENT_CONTEXT_TIMEZONE
         target = next((dv for dv in mgr if self._dev_id(dict(dv.data)) == dev_id), None)
         if target is None:
-            return False
+            return None
         req = {"clientContext": {"appName": "iCloud Find (Web)", "appVersion": "2.0", "apiVersion": "3.0",
                                  "deviceListVersion": 1, "fmly": self.cfg.with_family,
                                  "timezone": _FMIP_CLIENT_CONTEXT_TIMEZONE, "inactiveTime": 0,
@@ -251,7 +253,7 @@ class ICloudSource:
                                            owner, info["http"], info["statusCode"], info["isLocating"],
                                            info["fix_age_s"], info["devices_in_reply"])
         self.counters["single_locates"] = self.counters.get("single_locates", 0) + 1
-        return True
+        return info
 
     def poll_once(self, force_locate: bool = False) -> None:
         from pyicloud.exceptions import (PyiCloud2FARequiredException, PyiCloudAuthRequiredException,
@@ -261,8 +263,9 @@ class ICloudSource:
                 return
             self.last_poll = time.time()
             self.counters["polls"] += 1
-            locate = force_locate or (self.cfg.locate_minutes > 0 and
-                                      time.time() - self.last_locate >= self.cfg.locate_minutes * 60)
+            locate = bool(force_locate)
+            if locate:
+                self.tracker.record_request("ALL", time.time())
             try:
                 mgr = self.api.devices  # first access does initClient
                 mgr.refresh(locate=locate)
@@ -300,7 +303,12 @@ class ICloudSource:
             if target is None:
                 raise KeyError(f"{dev_id} not in the current Find My device list")
             before = (target.data.get("location") or {}).get("timeStamp")
-            self._request_locate(mgr, dev_id)
+            row = db.q1("SELECT owner FROM devices WHERE id=?", (dev_id,))
+            owner = row["owner"] if row else None
+            info = self._request_locate(mgr, dev_id, owner)
+            if info:
+                self.tracker.record_request(owner or dev_id, time.time())
+                self.tracker.record_reply(owner, info.get("isLocating"), time.time())
             after, waited = before, 0
             while waited < 36:
                 time.sleep(6)
@@ -318,6 +326,7 @@ class ICloudSource:
         info = dict(mgr.user_info or {})
         members = info.get("membersInfo") or {}
         me = " ".join(x for x in (info.get("firstName"), info.get("lastName")) if x) or "Me"
+        self.tracker.self_owner = me
         raw_dump = []
         n = 0
         new_owners: set[str] = set()

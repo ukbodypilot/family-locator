@@ -2,6 +2,22 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.4.0] -- 2026-11-21
+
+- **Family-wide request governor.** The evidence suggests Apple limits active locates of other
+  family members' devices per account, not per device: Luke, never followed, stalled at the same
+  moment as Hugh and Tomoko. So requests are now governed for the whole family:
+  - one hourly budget for all family members (default 20);
+  - at least 20 seconds between any two requests;
+  - priority to manual follows, then moving people, then normal schedules;
+  - a family-wide pause after 3 replies with `isLocating: false` (15 minutes, then a probe,
+    doubling up to 2 hours).
+  The account holder's own devices are exempt. Request history and pauses are saved, so restarts
+  can't reset them.
+- **"Locate everyone now"** counts against the family budget.
+- **Setup tab** shows the family budget used this hour, or the pause and its reason. **`/metrics`**
+  gains `famloc_family_*` figures.
+
 ## [1.3.2] -- 2026-11-21
 
 - **Backs off when phones don't answer.** Each fresh-location request is checked for a new fix

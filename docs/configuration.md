@@ -32,6 +32,8 @@ inside any `[section]`; sections are only for readability.
 | `follow_rest_minutes` | 10 | yes | Stop following after no movement for this long. |
 | `follow_max_hours` | 4 | yes | Longest single follow. |
 | `movement_threshold_m` | 250 | yes | How far apart two fixes must be to count as moving (also beyond their combined accuracy). |
+| `family_locates_per_hour` | 20 | yes | Budget for fresh-location requests to all family members together, per rolling hour. Your own devices don't count. |
+| `family_pause_minutes` | 15 | yes | First family-wide pause when Apple stops acting on requests; doubles on each failed probe, up to 2 hours. |
 | `with_family` | true | | Include Family Sharing members' devices. |
 | `airtag_poll_minutes` | 15 | yes | How often to fetch AirTag history (5–1440 min). |
 

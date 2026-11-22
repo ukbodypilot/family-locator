@@ -58,26 +58,38 @@ A phone on the default 15 minutes, parked, then driving for 20 minutes, then par
 1:13  fresh location
 ```
 
-## When phones don't answer
+## The family budget
 
-Every fresh-location request is checked: did a new fix arrive within 3 minutes? After 3 requests
-in a row with no answer, that person's interval doubles, then doubles again, up to once an hour. It
-resets as soon as their phone answers. Manual follow is never slowed down.
+Apple appears to limit how often one account can actively locate **other family members'**
+devices. When it does, its replies still look successful, but show `isLocating: false`, and no new
+fix arrives. Locating your own devices carries on as normal. So requests are governed for the whole
+family, not person by person:
 
-This matters because Apple seems to limit how often one account can actively locate **other family
-members'** devices. When that happens, its replies still look successful, but the device shows
-`isLocating: false` and no new fix arrives. Locating your own devices carries on as normal. It
-cleared by itself after about 25 quiet minutes. After a restart, the first requests wait 2 minutes
-and are spread 30 seconds apart, so a restart never sends a burst.
+- **One budget:** at most 20 fresh-location requests an hour across all family members together
+  (**Family budget** on the Setup tab).
+- **Spacing:** any two requests, for anyone, are at least 20 seconds apart.
+- **Priority when the budget is tight:** manual follows first, then people who are moving, then
+  normal schedules. Within each group, whoever has waited longest goes first.
+- **Family-wide pause:** after 3 family requests in a row come back with `isLocating: false`, all
+  family requests pause for 15 minutes. Then one probe request goes out. If Apple acts on it,
+  everything resumes. If not, the pause doubles, up to 2 hours.
+- **Your own devices are exempt:** the signed-in Apple ID's devices aren't counted against the
+  budget and aren't paused.
+- **Restarts don't reset it:** request history and any pause are saved in the database.
+- **Per-person backoff too:** a person whose phone doesn't produce a new fix after 3 requests in a
+  row has their interval doubled, up to once an hour, until it answers again.
+
+The Setup tab shows how much of the budget has been used this hour, or the pause and its reason.
+After a restart, the first requests wait 2 minutes and are spread 30 seconds apart.
 
 To see what's happening:
 
 ```bash
 journalctl --user-unit family-locator | grep "locate "      # Apple's reply to each request
-curl -s localhost:8790/metrics | grep -E "answered|backoff"   # per person, anonymised
+curl -s localhost:8790/metrics | grep -E "family|answered|backoff"
 ```
 
-A proxy or different IP address wouldn't help: requests are signed in as your Apple ID, so any
+A proxy or a different IP address wouldn't help: requests are signed in as your Apple ID, so any
 limit follows the account.
 
 ## Follow now

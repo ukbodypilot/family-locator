@@ -285,6 +285,60 @@ def test_tracker_backs_off_unanswered_and_recovers():
     assert t.interval_minutes("Kid", now + 1) == 2
 
 
+def _gov_tracker(**kw):
+    from famloc.tracking import Tracker
+    db.set_setting("locate_governor", {})
+    t = Tracker(config.Config(family_locates_per_hour=kw.get("budget", 20), family_pause_minutes=15, locate_minutes=15, moving_locate_minutes=2))
+    t.self_owner = "Me"
+    return t
+
+
+def test_governor_budget_and_spacing():
+    t = _gov_tracker(budget=5)
+    now, sent = 0.0, []
+    fam = ["A", "B", "C"]
+    for _ in range(240):                                    # one hour of 15 s ticks, everyone always due
+        pick = t.select(fam, now)
+        for o in pick:
+            t.record_request(o, now); t.record_reply(o, True, now); t.mark_sent(o, now); sent.append(now)
+        now += 15
+    assert len(sent) == 5, len(sent)                        # family budget per rolling hour
+    assert all(b - a >= 20 for a, b in zip(sent, sent[1:]))
+
+
+def test_governor_self_exempt_priority_and_pause():
+    t = _gov_tracker()
+    now = 1000.0
+    t.start_manual("B", 30, now)
+    assert t.select(["A", "B"], now) == ["B"]               # manual follow first
+    t.record_request("B", now)
+    assert t.select(["A", "Me"], now + 5) == []             # 20 s spacing applies to everyone
+    for i in range(3):                                      # Apple ignores 3 family requests in a row
+        now += 30; t.record_request("A", now); t.record_reply("A", False, now)
+    assert t.family_paused(now + 1) and t.family_status(now + 1)["pause_level"] == 1
+    assert t.select(["A", "B"], now + 60) == []             # family paused...
+    assert t.select(["A", "Me"], now + 60) == ["Me"]        # ...own devices are not
+    now += 15 * 60 + 1                                      # pause over: one probe allowed
+    assert t.select(["A"], now) == ["A"]
+    t.record_request("A", now); t.record_reply("A", False, now)   # probe ignored too -> 30 min
+    assert t.family_status(now)["pause_level"] == 2 and t.gov["until"] - now == 30 * 60
+    now += 30 * 60 + 1
+    t.record_request("A", now); t.record_reply("A", True, now)    # Apple acts again -> cleared
+    assert not t.family_paused(now) and t.family_status(now)["pause_level"] == 0
+
+
+def test_governor_survives_restart():
+    from famloc.tracking import Tracker
+    t = _gov_tracker(budget=3)
+    for i in range(3):
+        t.record_request("A", 5000.0 + i * 30)
+    t.record_reply("A", False, 5100); t.record_reply("A", False, 5100); t.record_reply("A", False, 5100)
+    t2 = Tracker(t.cfg); t2.self_owner = "Me"               # "restart"
+    assert t2.family_used(5200) == 3 and t2.family_paused(5200)
+    assert t2.select(["A"], 5200) == []
+    db.set_setting("locate_governor", {})
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):
