@@ -2,6 +2,37 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.5.0] -- 2026-11-21
+
+Fresh family positions, and the map follows the device that's actually with each person.
+
+- **Find My session renewal.** Family members' positions only refresh when a new Find My session
+  starts. Apple ignores fresh-location requests for other people's devices (`isLocating: false`)
+  and lets the session go stale. That caused the simultaneous "blackouts" for family in two
+  countries while your own devices kept updating. The app now starts a fresh session every 10
+  minutes (`session_renew_minutes`; Apple's lifespan is 15) and reads every 60 seconds, the longest
+  gap Apple's own web client allows. A watchdog starts a session early if family fixes stop for 10
+  minutes while their devices are online.
+- **New defaults from measurement:** `poll_seconds` 60 (was 300), `session_renew_minutes` 10,
+  `family_locates_per_hour` 2 (a probe only, since family requests are ignored).
+- **Following targets the moving device.** Fast locates go to the device whose own fixes show
+  movement, with hand-over if another device takes over. A device left behind is never located
+  fast, and following ends when the moving device comes to rest.
+- **The map uses the device that's with the person.** When a person's devices disagree by more
+  than 300 m, the one that moved most recently is used, e.g. the Watch that left home rather than
+  the phone that stayed. The phone is used when they agree. Marker, track, timeline lane and status
+  line all use the same device, so tracks always join the marker. Fixes Luke's new position showing
+  with no line to his earlier path.
+- **Timeline:** clicking a lane centres the map on that person at that moment.
+- **Measurement tools:**
+  - a durable event log (`locate_events`, 30 days) of every request, Apple's reply, answers versus
+    self-reported fixes, pauses, blocks, follows, session renewals and settings changes;
+  - `tools/locate_report.py`;
+  - `tools/tune.py`, for live setting changes with a reason log;
+  - `tools/email_report.py`, with a `famloc-report` systemd timer for periodic report emails.
+- **Settings apply live.** Saved settings are re-read every minute, so no restart is needed. The
+  governor's limits (pause trigger, pause cap, spacing, per-person backoff) are now settings.
+
 ## [1.4.0] -- 2026-11-21
 
 - **Family-wide request governor.** The evidence suggests Apple limits active locates of other

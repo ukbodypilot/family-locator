@@ -25,15 +25,20 @@ inside any `[section]`; sections are only for readability.
 
 | Key | Default | UI | Meaning |
 |---|---|---|---|
-| `poll_seconds` | 300 | yes | How often to read the positions Apple already has (60–3600 s). Costs nothing on the devices. |
+| `poll_seconds` | 60 | yes | How often to read the positions Apple already has (60–3600 s). Costs nothing on the devices; 60 s is the longest gap Apple's own web client allows. |
 | `locate_minutes` | 15 | yes | Default fresh-location interval per person (0 = never, at least 1). Each person can override it. |
 | `follow_moving` | true | yes | Follow people while they move (each person can override it). |
 | `moving_locate_minutes` | 2 | yes | Fresh-location interval while following (0.5–15 min; 0.5 = every 30 seconds). |
 | `follow_rest_minutes` | 10 | yes | Stop following after no movement for this long. |
 | `follow_max_hours` | 4 | yes | Longest single follow. |
 | `movement_threshold_m` | 250 | yes | How far apart two fixes must be to count as moving (also beyond their combined accuracy). |
-| `family_locates_per_hour` | 20 | yes | Budget for fresh-location requests to all family members together, per rolling hour. Your own devices don't count. |
+| `family_locates_per_hour` | 2 | yes | Budget for fresh-location requests to all family members together, per rolling hour. Your own devices don't count. |
 | `family_pause_minutes` | 15 | yes | First family-wide pause when Apple stops acting on requests; doubles on each failed probe, up to 2 hours. |
+| `family_throttle_after` | 3 | yes | Family replies in a row with `isLocating: false` before a family pause. |
+| `family_pause_cap_minutes` | 120 | yes | Longest family pause. |
+| `locate_spacing_s` | 20 | yes | Minimum gap between any two locate requests. |
+| `unanswered_backoff_after` | 3 | yes | Unanswered requests in a row before a person's interval is doubled. |
+| `session_renew_minutes` | 10 | yes | Start a fresh Find My session this often (0 = never). Family members' positions refresh at each new session; Apple's session lifespan is 15 minutes. |
 | `with_family` | true | | Include Family Sharing members' devices. |
 | `airtag_poll_minutes` | 15 | yes | How often to fetch AirTag history (5–1440 min). |
 

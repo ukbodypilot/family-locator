@@ -3,12 +3,31 @@
 Find My only knows where a device was the last time it reported. Family Locator gets new locations
 in two ways:
 
-- **Reading.** Every 5 minutes (`poll_seconds`) it reads the positions Apple already holds. This is
+- **Reading.** Every minute (`poll_seconds`) it reads the positions Apple already holds. This is
   a request to Apple only; the phones aren't involved at all. It only shows something new when a
   phone has reported in by itself.
 - **Fresh locations.** It asks Apple to get a new fix from a person's phone right now, exactly like
   opening Find My and selecting them. Apple sends the phone a push message over the connection it
   already keeps open, and the phone takes one quick fix and answers within about 5 to 30 seconds.
+
+## Find My sessions, and why family positions need them
+
+The app talks to Apple the way the iCloud.com Find My page does. Each session's settings, sent by
+Apple, describe a live viewer: check back every 2 to 60 seconds, and a session lifespan of 15
+minutes. What we measured on 2026-11-21:
+
+- **Your own devices:** fresh-location requests work. Apple replies `isLocating: true` and switches
+  the session to live (check back every 2 s).
+- **Family members' devices:** Apple ignores fresh-location requests (`isLocating: false`, check back
+  every 30 s). Their new positions reach us when a **new session** starts. Fresh fixes for all three
+  arrived within a minute of each new session. Within a session they go stale, apart from occasional
+  reports from the phones themselves.
+
+So the app reads every 60 seconds (`poll_seconds`), starts a fresh session every 10 minutes
+(`session_renew_minutes`), and a watchdog starts one early if family fixes stop for 10 minutes while
+their devices are online. **For family members, the session interval is what sets freshness.**
+Following them faster can't help. Family fresh-location requests are kept to a probe (2 an hour) in
+case Apple's behaviour changes.
 
 ## Per-person intervals
 
@@ -29,6 +48,10 @@ When someone sets off, their locations get more frequent until they arrive:
 
 Each device is only ever compared with its own earlier fixes, so an iPad left at home and a
 phone in a pocket never look like a jump.
+
+Following always targets **the device that's actually moving**. If someone leaves their phone at
+home and goes out with a cellular Watch, the Watch is followed and the phone isn't, and following
+ends when the moving device comes to rest.
 
 1. **Starts:** a device's new fix lands more than 250 m from its previous one (`movement_threshold_m`), and
    further than the two fixes' combined accuracy, so GPS wobble doesn't count. That happens on their

@@ -22,20 +22,20 @@ class Config:
     proxy_prefix: str = "/family/"  # path the radio-gateway proxies to this app
 
     # iCloud Find My polling
-    poll_seconds: int = 300  # read Apple's cached positions this often
+    poll_seconds: int = 60   # read Apple's stored positions this often (Apple's web client checks back at least every 60 s)
     locate_minutes: int = 15  # default per-person fresh-location interval (0 = never)
     follow_moving: bool = True        # locate a moving person more often until they stop
     moving_locate_minutes: float = 2.0
     follow_rest_minutes: float = 10.0  # "stopped" = no movement for this long
     follow_max_hours: float = 4.0      # safety cap on one follow
     movement_threshold_m: float = 250.0
-    family_locates_per_hour: int = 20     # budget for fresh-location requests to family members' devices
+    family_locates_per_hour: int = 2      # Apple ignores locate requests for family members' devices; keep a probe only
     family_pause_minutes: float = 15.0     # first family-wide pause when Apple stops acting on requests
     family_throttle_after: int = 3         # isLocating=false replies in a row before a family pause
     family_pause_cap_minutes: float = 120.0
     locate_spacing_s: float = 20.0         # minimum gap between any two locate requests
     unanswered_backoff_after: int = 3      # per person: unanswered requests in a row before slowing them
-    session_renew_minutes: float = 14.0    # start a fresh Find My web session this often (Apple's sessionLifespan is 15 min); 0 = never
+    session_renew_minutes: float = 10.0    # start a fresh Find My web session this often (Apple's sessionLifespan is 15 min); 0 = never
     with_family: bool = True
 
     # AirTags (FindMy.py)

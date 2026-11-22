@@ -21,7 +21,10 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
 - **Places and alerts.** Draw Home, School or Work, then get an email when someone arrives or
   leaves. You can limit a place to certain people, for example "only Sam at School".
 - **Follows people while they move.** Each person has their own fresh-location interval. When
-  someone sets off they're located every 2 minutes until they've stopped.
+  someone sets off, the device that's actually moving is located every 2 minutes until it stops.
+- **Keeps family positions fresh.** Family members' positions refresh when a new Find My session
+  starts, so the app renews its session every 10 minutes and reads every minute, within Apple's
+  own limits. It never hammers.
 - **Daily summary email.** Every evening: who went where, how far, and a link per person.
 - **Works on a phone, from anywhere,** through the radio gateway's Cloudflare tunnel. Email links
   always carry the current address.
