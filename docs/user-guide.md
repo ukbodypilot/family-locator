@@ -94,7 +94,8 @@ Your choices are remembered in this browser.
 
 ![Timeline lanes, the Viewing banner and a hover tooltip](images/history-lanes.png)
 
-- **Ranges.** **Live** shows the last 24 hours and follows the present. **6h** to **1y** and
+- **Ranges.** **Live** shows the last 24 hours and follows the present. The page refreshes every
+  30 seconds while it's on screen, and straight away when you come back to it. **6h** to **1y** and
   **All** pick a fixed range. The calendar button sets a custom range, and the arrows step a
   whole range earlier or later.
 - **Lanes.** One row per person, coloured by where they were: each saved place in its own colour,

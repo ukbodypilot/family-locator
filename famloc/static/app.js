@@ -1248,7 +1248,18 @@ async function start() {
   await setPreset(S.preset === "custom" ? "live" : S.preset);
   handleHash();
   addEventListener("hashchange", handleHash);
-  setInterval(() => { if (!document.hidden) refreshAll().catch(() => {}); }, 60000);
+  // Live data: refresh every 30 s while visible, and straight away when the page comes back into view
+  // (phones keep a backgrounded tab's old data until then).
+  let refreshing = false;
+  const liveRefresh = async () => {
+    if (document.hidden || refreshing) return;
+    refreshing = true;
+    try { await refreshAll(); } catch { /* next tick retries */ } finally { refreshing = false; }
+  };
+  setInterval(liveRefresh, 30000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { liveRefresh(); loadStatus().catch(() => {}); } });
+  addEventListener("focus", () => liveRefresh());
+  addEventListener("pageshow", (e) => { if (e.persisted) liveRefresh(); });   // back/forward cache on iOS
   setInterval(() => { if (!document.hidden) loadStatus().catch(() => {}); }, 20000);
   setInterval(() => { if (!document.hidden) updateBanner(); }, 15000);
 }
