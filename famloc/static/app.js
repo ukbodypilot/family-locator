@@ -187,8 +187,10 @@ const L_photos = L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRa
 const L_temp = L.layerGroup().addTo(map);
 const L_rail = L.tileLayer("https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, subdomains: "abc",
   attribution: 'Railways &copy; <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> (CC-BY-SA)' });
+/* Speed colouring is a switch, not drawn content: its presence on the map turns it on. */
+const L_speed = L.layerGroup();
 const OVER = {
-  "People and items": L_people, "Tracks": L_tracks, "Accuracy circles": L_acc, "Every device separately": L_devices,
+  "People and items": L_people, "Tracks": L_tracks, "Tracks coloured by speed": L_speed, "Accuracy circles": L_acc, "Every device separately": L_devices,
   "Every fix as a dot": L_points, "Heatmap": L_heat, "Stays (from Insights)": L_stays, "Places": L_places, "Photo locations": L_photos, "Railways (OpenRailwayMap)": L_rail,
 };
 // The heatmap draws onto a canvas sized to the map; with a 0-size map (page still hidden, panel
@@ -204,13 +206,17 @@ for (const fn of ["_redraw", "_reset"]) {
 }
 // Saved overlays are restored once the map is visible (see restoreOverlays in start()).
 const overOn = store.get("overlays2", null);
+const overSeen = store.get("overlaysSeen", null);        // overlay names that existed when overlays2 was saved
+const OVER_DEFAULT_ON = new Set(["Tracks coloured by speed"]);   // on for everyone until they turn it off
 let overlaysRestored = false;
 function restoreOverlays() {
   if (overlaysRestored) return;
   overlaysRestored = true;
   map.invalidateSize();
-  if (overOn) for (const [n, l] of Object.entries(OVER)) { if (overOn.includes(n)) l.addTo(map); else map.removeLayer(l); }
-  else L_photos.addTo(map);
+  if (overOn) for (const [n, l] of Object.entries(OVER)) {
+    const isNew = !(overSeen || []).includes(n);
+    if (overOn.includes(n) || (isNew && OVER_DEFAULT_ON.has(n))) l.addTo(map); else map.removeLayer(l);
+  } else { L_photos.addTo(map); for (const n of OVER_DEFAULT_ON) OVER[n].addTo(map); }
 }
 const layerCtl = L.control.layers(BASES, OVER, { position: "topright", collapsed: true }).addTo(map);
 /* Thunderforest Transport needs a (free) API key; offered only when one is set in data/config.toml. */
@@ -224,8 +230,9 @@ function addKeyedLayers(keys) {
   BASES[name] = lyr; layerCtl.addBaseLayer(lyr, name);
   if (store.get("base", "") === name) { Object.values(BASES).forEach((b) => map.hasLayer(b) && map.removeLayer(b)); lyr.addTo(map); }
 }
-map.on("baselayerchange", (e) => store.set("base", e.name));
-map.on("overlayadd overlayremove", () => { if (!overlaysRestored) return; store.set("overlays2", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n)); schedRender(); });
+let curBase = baseName;
+map.on("baselayerchange", (e) => { store.set("base", e.name); curBase = e.name; schedRender(); });
+map.on("overlayadd overlayremove", () => { if (!overlaysRestored) return; store.set("overlays2", Object.entries(OVER).filter(([, l]) => map.hasLayer(l)).map(([n]) => n)); store.set("overlaysSeen", Object.keys(OVER)); schedRender(); });
 map.on("moveend", () => { const c = map.getCenter(); store.set("view", [c.lat, c.lng]); store.set("zoom", map.getZoom()); });
 map.on("zoomend", () => { $("#map").classList.toggle("far", map.getZoom() < 14); schedRender(); });
 const fly = (ll, z) => (reduceMotion ? map.setView(ll, z) : map.flyTo(ll, z, { duration: 0.6 }));
@@ -360,7 +367,8 @@ function avgSpeed(pos, t = S.t) {
   for (let j = 1; j < pts.length; j++) path += haversine(pts[j - 1][1], pts[j - 1][2], pts[j][1], pts[j][2]);
   return { kmh: path / span * 3.6, fixes: pts.length, span };
 }
-const fmtSpeed = (v) => `${Math.round(v.kmh)} km/h (${Math.round(v.kmh / 1.609344)} mph)`;
+const MPH = (kmh) => Math.round(kmh / 1.609344);
+const fmtSpeed = (v) => `${MPH(v.kmh)} mph`;
 
 function personStatus(p) {
   const pos = personPos(p);
@@ -408,6 +416,18 @@ $("#tApply").onclick = () => {
 const shift = (dir) => { const span = S.end - S.start; customRange(S.start + dir * span, S.end + dir * span); };
 $("#tPrev").onclick = () => shift(-1);
 $("#tNext").onclick = () => shift(1);
+/* Phone: the timeline folds down to one row (range + play) so the map gets the screen.
+   Only the phone CSS reads .folded; desktop always shows everything. */
+function setTbFold(f) {
+  $("#timebar").classList.toggle("folded", f);
+  const b = $("#tbFold"), lab = f ? "Show the timeline" : "Hide the timeline";
+  b.setAttribute("aria-expanded", String(!f)); b.title = lab; b.setAttribute("aria-label", lab);
+}
+setTbFold(store.get("tbFolded", true));
+$("#tbFold").onclick = () => {
+  const f = !$("#timebar").classList.contains("folded"); setTbFold(f); store.set("tbFolded", f);
+  requestAnimationFrame(() => { map.invalidateSize({ pan: false }); drawLanes(); });
+};
 $("#moreBtn").onclick = () => { const on = $("#timebar").classList.toggle("more"); $("#moreBtn").setAttribute("aria-expanded", String(on)); };
 
 const scrub = $("#scrub");
@@ -614,12 +634,86 @@ function centreOnLane() {
 }
 addEventListener("resize", () => drawLanes());
 
+/* ---------------- track speed colours ----------------
+   Rainbow, as chosen: purple walking, blue to 10 mph, green to 25, yellow to 50, orange to
+   75, red over. Shades tuned with the dataviz validator so NEIGHBOURING bands stay apart: on light
+   tiles (#f2efe9) every check passes (CVD worst 8.9, normal vision >= 15.8); yellow/orange are
+   low-contrast on light tiles and purple/red on dark ones, which the casing (dark halo on light
+   maps, light halo on dark) plus the legend and hover labels make up for. Same colours on every map. */
+const SPEED_BINS = [[4, "under 4"], [10, "4–10"], [25, "10–25"], [50, "25–50"], [75, "50–75"], [Infinity, "75+"]];   // mph
+const SPEED_COLORS = ["#7b3fd0", "#1e88e5", "#2e9e2e", "#d4b000", "#f06400", "#b71c1c"];
+const SPEED_UNSURE = "#8a8a86", SPEED_SEG_GAP = 15 * 60;   // a longer hop is a straight line over a gap, not the path
+const darkTiles = () => /dark/i.test(curBase);
+function segSpeedBin(p0, p1) {
+  if ((p0[3] || 0) > SPEED_MAX_ACC || (p1[3] || 0) > SPEED_MAX_ACC) return -1;   // a cell-tower guess: no honest speed
+  const dt = p1[0] - p0[0]; if (dt <= 0) return -2;                             // same moment: inherit
+  if (dt > SPEED_SEG_GAP) return -1;                                             // e.g. 68 km in 2.6 h = "16 mph" incl. a stop
+  const mph = haversine(p0[1], p0[2], p1[1], p1[2]) / dt * 2.2369363;
+  return SPEED_BINS.findIndex(([max]) => mph < max);
+}
+let speedLegend = null;
+function showSpeedLegend(on) {
+  if (!on) { if (speedLegend) { speedLegend.remove(); speedLegend = null; } return; }
+  const html = `<span class="sl-h">mph</span>${SPEED_BINS.map(([, lab], i) => `<span class="sl-i"${i ? "" : ' title="Walking"'}><i style="background:${SPEED_COLORS[i]}"></i>${lab}</span>`).join("")}<span class="sl-i sl-unsure" title="More than 15 min between fixes, or a fix less accurate than 200 m"><i class="unsure"></i>no speed</span>`;
+  if (!speedLegend) {
+    speedLegend = L.control({ position: "bottomleft" });
+    speedLegend.onAdd = () => { const el = L.DomUtil.create("div", "speed-legend"); el.setAttribute("aria-label", "Track colour = speed"); return el; };
+    speedLegend.addTo(map);
+  }
+  speedLegend.getContainer().innerHTML = html;
+}
+
 /* ---------------- render ---------------- */
 let rafPending = false;
 function schedRender() { if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; render(); }); } }
 
-/* clicking a person's marker centres the map on them (zoom unchanged); the popup opens there */
-function centreOn(e) { map.panTo(e.target.getLatLng(), { animate: !reduceMotion, duration: 0.4 }); }
+/* Clicking a person or device (marker or list row) centres the map on them and KEEPS it centred:
+   every render (live update or playback frame) pans to where they are now. Zoom is left alone.
+   Dragging the map or the chip's x releases it; wheel / double-click / pinch zoom do NOT, and while
+   locked they zoom around the map centre (= the target) instead of the pointer, so the target
+   stays put. S.lock = {kind: "p", name} | {kind: "d", id}. */
+function centreOn(e) { unlock(); map.panTo(e.target.getLatLng(), { animate: !reduceMotion, duration: 0.4 }); }
+let lockLL = null;
+function lockPos(L0 = S.lock) {
+  if (!L0) return null;
+  if (L0.kind === "p") { const p = S.personByName[L0.name], pos = p && personPos(p, S.t); return pos ? [pos.p[1], pos.p[2]] : null; }
+  const d = S.byId[L0.id], pt = d && (lastAt(d.id, S.t) || (S.follow ? lastOf(d) : null));
+  return pt ? [pt[1], pt[2]] : null;
+}
+function zoomAroundCentre(on) {
+  const v = on ? "center" : true;              // Leaflet: "center" = zoom about the map centre
+  map.options.scrollWheelZoom = v; map.options.doubleClickZoom = v; map.options.touchZoom = v;
+}
+function setLock(target, ll) {
+  S.lock = target; lockLL = ll; zoomAroundCentre(!!target); showLockChip();
+}
+function lockOn(target) {
+  setLock(target, lockPos(target));
+  if (lockLL) map.panTo(lockLL, { animate: !reduceMotion, duration: 0.4 });
+}
+function unlock() { if (!S.lock) return; setLock(null, null); }
+function keepLocked() {
+  if (!S.lock) return;
+  const ll = lockPos(); if (!ll) return;                     // no fix at this moment: stay put, keep the lock
+  const same = lockLL && Math.abs(ll[0] - lockLL[0]) < 1e-7 && Math.abs(ll[1] - lockLL[1]) < 1e-7;
+  const off = map.latLngToContainerPoint(ll).distanceTo(map.latLngToContainerPoint(map.getCenter()));
+  if (same && off < 3) return;                               // there, and still in the middle
+  lockLL = ll;
+  map.panTo(ll, { animate: !reduceMotion && !S.playing, duration: 0.5 });
+}
+function showLockChip() {
+  let el = $("#lockChip");
+  if (!S.lock) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("div"); el.id = "lockChip"; el.setAttribute("role", "status");
+    $("#map").appendChild(el);
+    L.DomEvent.disableClickPropagation(el);
+  }
+  const name = S.lock.kind === "p" ? (S.personByName[S.lock.name] || { display: S.lock.name }).display : (S.byId[S.lock.id] || { name: "device" }).name;
+  el.innerHTML = `<span>Centred on <b>${esc(name)}</b></span><button aria-label="Stop keeping ${esc(name)} centred" title="Stop following on the map">×</button>`;
+  $("button", el).onclick = unlock;
+}
+map.on("dragstart", unlock);
 function render(full = false) {
   const span = S.end - S.start || 1;
   scrub.value = Math.round(((S.t - S.start) / span) * 1000);
@@ -634,7 +728,8 @@ function render(full = false) {
     const i1 = idxAt(a, S.t); if (i1 < 0) return;
     const i0 = idxAt(a, from - 1e-6) + 1;
     let seg = [];
-    const flush = () => { if (seg.length > 1) L.polyline(seg, { color, weight: opts.weight || 3.5, opacity: opts.opacity || 0.85, dashArray: opts.dash, renderer: canvasR, lineJoin: "round" }).addTo(L_tracks); seg = []; };
+    const plain = !(speedOn && !opts.dash);
+    const flush = () => { if (seg.length > 1 && plain) L.polyline(seg, { color, weight: opts.weight || 3.5, opacity: opts.opacity || 0.85, dashArray: opts.dash, renderer: canvasR, lineJoin: "round" }).addTo(L_tracks); seg = []; };
     for (let i = i0; i <= i1; i++) {
       const p = a[i];
       if (seg.length && p[0] - a[i - 1][0] > GAP_BREAK) flush();
@@ -643,6 +738,32 @@ function render(full = false) {
       if (wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1, fillOpacity: 0.7, renderer: canvasR }).bindPopup(() => fixPopup(d, p)).addTo(L_points);
     }
     flush();
+    if (speedOn && !opts.dash) drawSpeedRuns(a, i0, i1);
+  };
+  const speedOn = map.hasLayer(L_speed) && map.hasLayer(L_tracks);
+  showSpeedLegend(speedOn);
+  // speed mode: a surface-coloured casing, then runs of same-speed-band segments on top
+  const drawSpeedRuns = (a, i0, i1) => {
+    const casing = darkTiles() ? "rgba(255,255,255,.55)" : "rgba(25,25,24,.55)";
+    const runs = []; let cur = null, chunk = [];
+    const casings = [];
+    for (let i = Math.max(i0, 1); i <= i1; i++) {
+      const p0 = a[i - 1], p1 = a[i];
+      if (i - 1 < i0) continue;
+      if (p1[0] - p0[0] > GAP_BREAK) { if (chunk.length > 1) casings.push(chunk); chunk = []; cur = null; continue; }
+      if (!chunk.length) chunk.push([p0[1], p0[2]]);
+      chunk.push([p1[1], p1[2]]);
+      let b = segSpeedBin(p0, p1); if (b === -2) b = cur ? cur.b : 0;
+      if (cur && cur.b === b) cur.pts.push([p1[1], p1[2]]);
+      else { cur = { b, pts: [[p0[1], p0[2]], [p1[1], p1[2]]] }; runs.push(cur); }
+    }
+    if (chunk.length > 1) casings.push(chunk);
+    for (const c of casings) L.polyline(c, { color: casing, weight: 6, opacity: 1, renderer: canvasR, lineJoin: "round", interactive: false }).addTo(L_tracks);
+    for (const r of runs) {
+      const unsure = r.b < 0;
+      L.polyline(r.pts, { color: unsure ? SPEED_UNSURE : SPEED_COLORS[r.b], weight: 3.5, opacity: 1, dashArray: unsure ? "4 5" : null, renderer: canvasR, lineJoin: "round", lineCap: "round" })
+        .bindTooltip(unsure ? "No speed: a gap between fixes or a rough fix" : r.b === 0 ? "Walking (under 4 mph)" : `${SPEED_BINS[r.b][1]} mph`, { sticky: true }).addTo(L_tracks);
+    }
   };
 
   // people: one marker each, merged when together
@@ -672,8 +793,8 @@ function render(full = false) {
       const { p, st, lat, lon } = G.members[0];
       const sp = avgSpeed(st.pos);
       const ic = L.divIcon({ className: "pmark" + (st.stale ? " stale" : ""), iconSize: [34, 34], iconAnchor: [17, 17],
-        html: `<div class="av" style="background:${p.color}">${esc(initials(p.display))}</div><div class="lbl">${esc(firstName(p.display))}${sp ? `<span class="spd">${Math.round(sp.kmh)} km/h · ${Math.round(sp.kmh / 1.609344)} mph</span>` : ""}</div>` });
-      L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.display, keyboard: true }).bindPopup(() => personPopup(p), { autoPan: false }).on("click", centreOn).addTo(L_people);
+        html: `<div class="av" style="background:${p.color}">${esc(initials(p.display))}</div><div class="lbl">${esc(firstName(p.display))}${sp ? `<span class="spd">${fmtSpeed(sp)}</span>` : ""}</div>` });
+      L.marker([lat, lon], { icon: ic, zIndexOffset: 1000, title: p.display, keyboard: true }).bindPopup(() => personPopup(p), { autoPan: false }).on("click", () => lockOn({ kind: "p", name: p.name })).addTo(L_people);
     } else {
       if (G.place && G.members.some((m) => !m.st.place || m.st.place.id !== G.place.id)) G.place = null;
       const avs = G.members.map(({ p }) => `<div class="av" style="background:${p.color}" title="${esc(p.display)}">${esc(initials(p.display))}</div>`).join("");
@@ -688,17 +809,18 @@ function render(full = false) {
     const pt = lastAt(d.id, S.t) || (S.follow ? lastOf(d) : null); if (!pt) continue;
     drawTrack(d, "#7a7f86", { weight: 2, dash: "4 4" });
     L.marker([pt[1], pt[2]], { icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11], html: `<div class="dmark" style="background:#5e6b78;width:22px;height:22px;display:grid;place-items:center"><svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:#fff;stroke-width:2">${ICONS.tag}</svg></div>` }), title: d.name })
-      .bindPopup(() => fixPopup(d, pt, true)).addTo(L_people);
+      .bindPopup(() => fixPopup(d, pt, true), { autoPan: false }).on("click", () => lockOn({ kind: "d", id: d.id })).addTo(L_people);
   }
   // every device separately
   if (wantDevs) for (const p of S.people.filter(personOn)) for (const d of p.devices) {
     if (!devOn(d)) continue;
     const pt = lastAt(d.id, S.t) || (S.follow ? lastOf(d) : null); if (!pt) continue;
     L.marker([pt[1], pt[2]], { icon: L.divIcon({ className: "", iconSize: [14, 14], iconAnchor: [7, 7], html: `<div class="dmark" style="background:${p.color}"></div>` }), title: d.name })
-      .bindTooltip(d.name, { direction: "top", offset: [0, -6] }).bindPopup(() => fixPopup(d, pt, true)).addTo(L_devices);
+      .bindTooltip(d.name, { direction: "top", offset: [0, -6] }).bindPopup(() => fixPopup(d, pt, true), { autoPan: false }).on("click", () => lockOn({ kind: "d", id: d.id })).addTo(L_devices);
   }
   if (wantHeat) L_heat.setLatLngs(heat);
   renderPeople();
+  keepLocked();
 }
 
 /* ---------------- popups ---------------- */
@@ -769,7 +891,7 @@ function devRow(d) {
     if (e.target.closest(".dev-more")) return devMenu(d, e.target.closest(".dev-more"));
     if (e.target.closest(".eye")) return setMapOff([d.id], on);
     const p = lastAt(d.id, S.t) || lastOf(d);
-    if (p) { fly([p[1], p[2]], Math.max(map.getZoom(), 16)); showMarkerFor(d, p); }
+    if (p) { fly([p[1], p[2]], Math.max(map.getZoom(), 16)); showMarkerFor(d, p); setLock({ kind: "d", id: d.id }, [p[1], p[2]]); }
     else toast(`Apple has no location for ${d.name}. It's offline or has location turned off.`);
   });
   return row;
@@ -815,7 +937,7 @@ function renderPeople() {
         noFix.forEach((d) => det.appendChild(devRow(d))); list.appendChild(det);
       }
     }
-    const go = () => { if (st.pos) fly([st.pos.p[1], st.pos.p[2]], Math.max(map.getZoom(), 15)); else toast(`No location for ${p.display} yet.`); if (isPhone()) $("#app").classList.add("noside"); };
+    const go = () => { if (st.pos) { fly([st.pos.p[1], st.pos.p[2]], Math.max(map.getZoom(), 15)); setLock({ kind: "p", name: p.name }, [st.pos.p[1], st.pos.p[2]]); } else toast(`No location for ${p.display} yet.`); if (isPhone()) $("#app").classList.add("noside"); };
     $(".person-main", box).onclick = (e) => { if (e.target.closest(".eye")) return setMapOff(["p:" + p.name], pOn); if (e.target.closest(".person-more")) return personMenu(p, e.target.closest(".person-more")); go(); };
     $(".person-main", box).onkeydown = (e) => { if (e.target.closest("button")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
     $(".avatar", box).title = "Change colour";
@@ -1159,7 +1281,7 @@ async function loadInsights() {
       <span>${s.place ? `<span class="place-name">${esc(s.place)}</span>` : `Unnamed spot <button class="name-it" data-stay="${i}">Name this place</button>`}</span>
       <span class="muted">${dur(s.minutes)}</span><span class="when">${esc(dt(s.start))}</span></div>`).join("") || '<p class="muted small">No stays in this range.</p>'}</div>
     <div class="ins-h">Trips</div><div class="ins-list" id="insTrips">${r.trips.map((t, i) => [t, i]).reverse().map(([t, i]) => `<div class="ins-item" data-i="${i}">
-      <span>${t.km} km in ${dur(t.minutes)}</span><span class="muted">${t.avg_kmh ? `${t.avg_kmh} km/h average` : ""}</span><span class="when">${esc(dt(t.start))}</span></div>`).join("") || '<p class="muted small">No trips in this range.</p>'}</div>`;
+      <span>${t.km} km in ${dur(t.minutes)}</span><span class="muted">${t.avg_kmh ? `${MPH(t.avg_kmh)} mph average` : ""}</span><span class="when">${esc(dt(t.start))}</span></div>`).join("") || '<p class="muted small">No trips in this range.</p>'}</div>`;
   for (const s of r.stays) L.circleMarker([s.lat, s.lon], { radius: Math.min(22, 5 + Math.sqrt(s.minutes)), color, weight: 2, fillOpacity: 0.22 })
     .bindTooltip(`${s.place ? esc(s.place) : "Stay"}<br>${esc(dt(s.start))}<br>${dur(s.minutes)}`).addTo(L_stays);
   const again = () => loadInsights();
@@ -1313,7 +1435,7 @@ $("#speed").value = store.get("speedPos2", 781); $("#trail").value = store.get("
 $("#speed").oninput = () => { store.set("speedPos2", Number($("#speed").value)); syncSliders(); };
 $("#trail").oninput = () => { store.set("trailPos", Number($("#trail").value)); syncSliders(); schedRender(); };
 
-function handleHash() {
+function handleHash(initial = false) {
   const h = decodeURIComponent(location.hash.slice(1));
   if (!h) return;
   if (h.startsWith("focus=")) {
@@ -1325,7 +1447,12 @@ function handleHash() {
     if (p) { const pos = personPos(p); if (pos) setTimeout(() => fly([pos.p[1], pos.p[2]], 16), 150); else toast(`No location for ${p.display} yet.`); }
     else if (d && d.last) setTimeout(() => fly([d.last.lat, d.last.lon], 16), 150);
   } else if (h === "lanes") { $("#timebar").scrollIntoView(); }
-  else if ($(`[data-tab="${h}"]`)) openTab(h);
+  else if ($(`[data-tab="${h}"]`)) {
+    openTab(h);
+    // The address remembers the last tab (#people, #setup...). On a phone, reloading must select it
+    // without sliding the sheet up over the map; a hash change while using the page still opens it.
+    if (initial && isPhone()) { $("#app").classList.add("noside"); setTimeout(() => map.invalidateSize(), 50); }
+  }
 }
 
 let started = false;
@@ -1339,8 +1466,8 @@ async function start() {
   await Promise.all([loadDevices(), loadFences(), loadStatus().catch(() => {})]);
   S.lastRefresh = now();
   await setPreset(S.preset === "custom" ? "live" : S.preset);
-  handleHash();
-  addEventListener("hashchange", handleHash);
+  handleHash(true);
+  addEventListener("hashchange", () => handleHash());
   // Live data: refresh every 30 s while visible, and straight away when the page comes back into view
   // (phones keep a backgrounded tab's old data until then).
   let refreshing = false;

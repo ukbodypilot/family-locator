@@ -2,6 +2,30 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [Unreleased]
+
+- **Usable on a phone.** On a narrow screen the timeline folds down to one row (range buttons and
+  play), and a chevron opens the speed and trail sliders and the lanes; the choice is remembered.
+  The map gets the rest of the screen: the +/- buttons and scale bar are hidden (pinch to zoom),
+  the speed legend fits on one line, the attribution is smaller, and the page height follows
+  iOS Safari's moving toolbars (`100dvh`). Reloading no longer slides the details panel up over
+  the map because the address still named the last tab (`#people`).
+- **The map follows who you clicked.** Clicking a person or device, on the map or in the list,
+  centres the map on them and keeps it centred as they move: on live updates and during
+  playback. A "Centred on (name)" chip shows while it's on; drag the map or press its × to stop.
+  Zooming keeps it: while it's on, the scroll wheel, double-click and pinch zoom around the
+  person instead of the pointer, so they stay in the middle. Clicking a group of people centres
+  once without following.
+- **Tracks coloured by speed.** Each stretch between two fixes is coloured by its speed, rainbow
+  order: purple walking (under 4 mph), blue 4-10, green 10-25, yellow 25-50, orange 50-75, red
+  75+. Legend at the bottom left, the band on hover, and a halo under the line so it reads on any
+  map. A stretch over a gap of more than 15 minutes, or touching a fix less accurate than 200 m,
+  is grey and dashed ("no speed"), so a long hop isn't passed off as a slow drive. On by default;
+  turn it off under **Tracks coloured by speed** in the layers menu to get the per-person track
+  colours back. Shades tuned so neighbouring bands stay distinguishable, including for
+  colour-blind viewers.
+- **Speeds are in mph everywhere:** the map label, person card, people list and Insights trips.
+
 ## [1.10.0] -- 2026-11-22
 
 Speed everywhere you look at a moving person.
