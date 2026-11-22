@@ -1,9 +1,11 @@
 """iCloud Find My (devices + Family Sharing) via pyicloud.
 
-The Apple ID password is NEVER written to disk: it is typed into the web UI, held only inside
-the live PyiCloudService object, and gone on restart. What persists is pyicloud's session +
-trust cookies in data/icloud_session/ (0700). While those stay valid, a restart resumes with no
-password. When Apple expires them, state becomes `need_login` and an email asks for a re-login.
+What persists is pyicloud's session + trust cookies in data/icloud_session/ (0700). While those
+stay valid, a restart resumes with no password. The Apple ID password is kept only if the user
+ticks "Remember password" at sign-in: then it sits in data/icloud_secret (0600, outside the DB so
+the daily DB backups never copy it) and lets pyicloud sign in again by itself when Apple refuses
+the session token; the trust cookie usually spares a 2FA prompt. Without it (or if Apple wants
+2FA), state becomes `need_login` / `need_2fa` and an email asks for a re-login.
 """
 
 from __future__ import annotations
@@ -23,6 +25,43 @@ from .config import DATA_DIR, Config  # noqa: E402
 
 log = logging.getLogger("famloc.icloud")
 SESSION_DIR = DATA_DIR / "icloud_session"
+SECRET_PATH = DATA_DIR / "icloud_secret"
+
+
+def _stored_password() -> str | None:
+    try:
+        return SECRET_PATH.read_text(encoding="utf-8") or None
+    except FileNotFoundError:
+        return None
+
+
+def _store_password(pw: str) -> None:
+    tmp = SECRET_PATH.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # never world-readable, not even briefly
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(pw)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, SECRET_PATH)
+
+
+def _forget_password() -> None:
+    SECRET_PATH.unlink(missing_ok=True)
+
+
+def _is_transient(e: BaseException) -> bool:
+    """True for failures that say nothing about the session: no network, DNS, timeouts, Apple 5xx."""
+    import requests
+    from pyicloud.exceptions import (PyiCloudConnectionException, PyiCloudPCSTimeoutException,
+                                     PyiCloudServiceUnavailable)
+    seen = set()
+    while e is not None and id(e) not in seen:       # pyicloud wraps the requests error
+        seen.add(id(e))
+        if isinstance(e, (PyiCloudConnectionException, PyiCloudPCSTimeoutException, PyiCloudServiceUnavailable,
+                          requests.ConnectionError, requests.Timeout, OSError)):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
 
 
 class ICloudSource:
@@ -42,6 +81,8 @@ class ICloudSource:
         self.tracker = Tracker(cfg)
         self.last_read = 0.0
         self.pending_until = 0.0
+        self._resume_delay = 0.0
+        self._resume_retry_at = 0.0
         SESSION_DIR.mkdir(parents=True, exist_ok=True)
         os.chmod(SESSION_DIR, 0o700)
 
@@ -52,6 +93,7 @@ class ICloudSource:
 
     def status(self) -> dict:
         return {"state": self.state, "detail": self.state_detail, "apple_id": self.apple_id,
+                "password_saved": SECRET_PATH.exists(),
                 "last_poll": self.last_poll, "last_ok": self.last_ok, "last_locate": self.last_locate,
                 **self.counters}
 
@@ -67,18 +109,36 @@ class ICloudSource:
         if not aid:
             return
         with self.lock:
+            pw = _stored_password()
             try:
-                api = self._make(aid, None)
+                api = self._make(aid, pw)
                 if api.requires_2fa or api.requires_2sa:
-                    self._set_need_login("saved session needs 2FA again")
+                    if pw:   # signed in again with the saved password; Apple only wants the code
+                        self._set_need_2fa(api, "Apple wants a 2FA code to finish signing in again")
+                    else:
+                        self._set_need_login("saved session needs 2FA again")
                     return
                 self.api = api
                 self.state, self.state_detail = "ok", "resumed saved session"
                 log.info("iCloud session resumed for saved Apple ID")
+                self._resume_delay = 0.0
+                db.set_setting("icloud_need_login_mailed", False)   # a later real expiry must email again
             except Exception as e:  # noqa: BLE001
-                self._set_need_login(f"saved session not accepted: {type(e).__name__}: {e}")
+                if _is_transient(e):
+                    # network not up yet (boot), DNS, Apple 5xx: the session may be fine - retry, don't
+                    # declare it dead. 2026-11-22 a boot-time DNS failure stopped tracking for hours.
+                    self._resume_delay = min(max(self._resume_delay * 2, 30.0), 600.0)
+                    self._resume_retry_at = time.time() + self._resume_delay
+                    self.counters["resume_retries"] = self.counters.get("resume_retries", 0) + 1
+                    self.state = "error"
+                    self.state_detail = (f"can't reach iCloud ({type(e).__name__}: {e}); "
+                                         f"retrying in {int(self._resume_delay)} s")
+                    log.warning("iCloud resume: %s", self.state_detail)
+                else:
+                    self._bad_password_check(e, pw)
+                    self._set_need_login(f"saved session not accepted: {type(e).__name__}: {e}")
 
-    def login(self, apple_id: str, password: str) -> dict:
+    def login(self, apple_id: str, password: str, remember: bool = False) -> dict:
         from pyicloud.exceptions import PyiCloudFailedLoginException
         with self.lock:
             try:
@@ -87,6 +147,11 @@ class ICloudSource:
                 self.state, self.state_detail = "logged_out", f"login failed: {e}"
                 return self.status()
             db.set_setting("icloud_apple_id", apple_id)
+            if remember:            # Apple accepted it, so it's worth keeping
+                _store_password(password)
+                log.info("Apple ID password saved for automatic re-login")
+            else:
+                _forget_password()
             self.api = api
             if api.requires_2fa or api.requires_2sa:
                 self.state, self.state_detail = "need_2fa", "enter the code shown on your Apple device"
@@ -125,9 +190,15 @@ class ICloudSource:
             self._logged_in()
             return self.status()
 
+    def forget_password(self) -> dict:
+        _forget_password()
+        log.info("saved Apple ID password deleted")
+        return self.status()
+
     def logout(self) -> dict:
         with self.lock:
             self.api = None
+            _forget_password()
             for p in SESSION_DIR.iterdir():
                 p.unlink()
             self.state, self.state_detail = "logged_out", "session files deleted"
@@ -138,6 +209,37 @@ class ICloudSource:
         db.set_setting("icloud_need_login_mailed", False)
         self.alerter.notify("auth", "iCloud login OK", "iCloud Find My login succeeded.", email=False)
         self._wake.set()
+
+    def _bad_password_check(self, e: BaseException, pw: str | None) -> None:
+        """A saved password Apple now rejects (changed on another device) is deleted, so we never
+        keep retrying a wrong password against the account (Apple locks accounts for that)."""
+        from pyicloud.exceptions import PyiCloudFailedLoginException
+        if pw and isinstance(e, PyiCloudFailedLoginException) and "password" in str(e).lower() \
+                and "no password" not in str(e).lower():
+            _forget_password()
+            log.warning("Apple rejected the saved password; deleted it")
+
+    def _auth_lost(self, e: BaseException) -> None:
+        """pyicloud has already tried to sign in again itself (with the saved password, if any)."""
+        from pyicloud.exceptions import PyiCloud2FARequiredException
+        pw = _stored_password()
+        if pw and isinstance(e, PyiCloud2FARequiredException) and self.api is not None:
+            self._set_need_2fa(self.api, "Apple wants a 2FA code to finish signing in again")
+            return
+        self._bad_password_check(e, pw)
+        self._set_need_login(f"{type(e).__name__}: {e}")
+
+    def _set_need_2fa(self, api, why: str) -> None:
+        self.api = api
+        self.state, self.state_detail = "need_2fa", why
+        log.warning("iCloud needs 2FA: %s", why)
+        if not db.get_setting("icloud_need_login_mailed", False):
+            db.set_setting("icloud_need_login_mailed", True)
+            from .alerts import links
+            self.alerter.notify("auth", "iCloud 2FA code needed",
+                                "The app signed back in to iCloud with your saved password, but Apple "
+                                "wants a 2FA code.\nApprove the prompt on your Apple device and type the "
+                                "code on the Setup tab.\n\n" + links(self.cfg, "setup"))
 
     def _set_need_login(self, why: str) -> None:
         self.api = None
@@ -164,6 +266,8 @@ class ICloudSource:
         while not stop.is_set():
             if self.state == "ok":
                 self.tick()
+            elif self.state == "error" and self.api is None and time.time() >= self._resume_retry_at:
+                self.resume()
             self._wake.wait(timeout=self.TICK_S)
             self._wake.clear()
 
@@ -242,7 +346,7 @@ class ICloudSource:
                         self.state_detail = "polling"
             except (PyiCloudFailedLoginException, PyiCloud2FARequiredException,
                     PyiCloudAuthRequiredException) as e:
-                self._set_need_login(f"{type(e).__name__}: {e}")
+                self._auth_lost(e)
             except Exception as e:  # noqa: BLE001
                 self.counters["poll_errors"] += 1
                 self.state_detail = f"poll error: {type(e).__name__}: {e}"
@@ -411,7 +515,7 @@ class ICloudSource:
                     self.state_detail = "polling"
             except (PyiCloudFailedLoginException, PyiCloud2FARequiredException,
                     PyiCloudAuthRequiredException) as e:
-                self._set_need_login(f"{type(e).__name__}: {e}")
+                self._auth_lost(e)
             except Exception as e:  # noqa: BLE001
                 self.counters["poll_errors"] += 1
                 self.state_detail = f"poll error: {type(e).__name__}: {e}"

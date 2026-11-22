@@ -3,6 +3,7 @@
    freshest fix from a carried device (iPhone preferred, then Watch, iPad). Devices sit underneath. */
 "use strict";
 
+let icRememberOpen = false, icAppleId = "";  // Setup tab: "Remember password…" form
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1194,7 +1195,11 @@ async function loadStatus() {
   $("#chips").innerHTML = [["iCloud", ic.state], ["AirTags", at.state], ["Email", st.email.configured ? "ok" : "off"]]
     .map(([n, s]) => `<button class="chip ${stateBadge(s)}" onclick="openTab('setup')" title="${esc(n)}: ${esc(stateWord(s))}"><i></i>${n}</button>`).join("");
   $("#icState").textContent = stateWord(ic.state); $("#icState").className = "badge " + stateBadge(ic.state);
-  $("#icDetail").textContent = [ic.apple_id, ic.detail].filter(Boolean).join(". ");
+  $("#icDetail").textContent = [ic.apple_id, ic.detail, ic.password_saved ? "Password saved for automatic re-login" : ""].filter(Boolean).join(". ");
+  $("#icForget").classList.toggle("hidden", !ic.password_saved);
+  icAppleId = ic.apple_id || "";
+  $("#icRememberBtn").classList.toggle("hidden", ic.password_saved || ic.state !== "ok" || icRememberOpen);
+  if (icRememberOpen && ic.state === "ok") $("#icLogin").classList.remove("hidden");
   $("#icLogin").classList.toggle("hidden", !["logged_out", "need_login"].includes(ic.state));
   $("#ic2fa").classList.toggle("hidden", ic.state !== "need_2fa");
   $("#icActions").classList.toggle("hidden", ic.state !== "ok");
@@ -1226,10 +1231,13 @@ async function loadStatus() {
   return st;
 }
 const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch (e) { toast(e.message, 6000); } finally { if (btn) btn.disabled = false; loadStatus().catch(() => {}); } };
-$("#icLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/login", { method: "POST", body: { apple_id: $("#icId").value, password: $("#icPw").value } }); $("#icPw").value = ""; toast(r.detail || stateWord(r.state)); }); });
+$("#icLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/login", { method: "POST", body: { apple_id: $("#icId").value, password: $("#icPw").value, remember: $("#icRemember").checked } }); $("#icPw").value = ""; icRememberOpen = false; toast(r.detail || stateWord(r.state)); }); });
 $("#ic2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/2fa", { method: "POST", body: { code: $("#icCode").value } }); $("#icCode").value = ""; toast(r.state === "ok" ? "Connected to iCloud." : r.detail); if (r.state === "ok") setTimeout(refreshAll, 4000); }); });
 $("#icSms").onclick = (e) => busy(e.target, async () => toast((await api("/api/icloud/sms", { method: "POST" })).detail));
 $("#icPoll").onclick = (e) => busy(e.target, async () => { toast("Locating everyone. This takes about 20 seconds.", 25000); await api("/api/icloud/poll?locate=true", { method: "POST" }); await refreshAll(); toast("Located everyone who answered."); });
+
+$("#icRememberBtn").onclick = () => { icRememberOpen = true; $("#icLogin").classList.remove("hidden"); $("#icRememberBtn").classList.add("hidden"); $("#icRemember").checked = true; if (!$("#icId").value) $("#icId").value = icAppleId; $("#icPw").focus(); };
+$("#icForget").onclick = (e) => { if (confirm("Delete the saved Apple ID password? Tracking carries on, but the next time Apple ends the session you'll have to sign in again.")) busy(e.target, async () => { await api("/api/icloud/forget-password", { method: "POST" }); toast("Saved password deleted."); refreshAll(); }); };
 $("#icLogout").onclick = (e) => { if (confirm("Sign out of iCloud? Tracking stops until you sign in again.")) busy(e.target, () => api("/api/icloud/logout", { method: "POST" })); };
 $("#atLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/airtag/login", { method: "POST", body: { apple_id: $("#atId").value, password: $("#atPw").value } }); $("#atPw").value = ""; toast(r.detail || stateWord(r.state)); }); });
 $("#at2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/airtag/2fa", { method: "POST", body: { code: $("#atCode").value } }); toast(r.detail || stateWord(r.state)); }); });

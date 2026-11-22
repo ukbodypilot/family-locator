@@ -19,6 +19,7 @@ in it is 0600. None of it is in git.
 | `backups/famloc-YYYY-MM-DD.db` | A daily copy of the database; the last 14 are kept. |
 | `config.toml` | Settings, including the Gmail app password. |
 | `icloud_session/` | Apple's session and trust cookies. Enough to read Find My until Apple expires them, so treat it like a password. |
+| `icloud_secret` | Only if you ticked **Remember password**: your Apple ID password in plain text, owner-only (0600). Kept out of the database so the daily backups never copy it; exclude it from any system backup too. |
 | `findmy_account.json` | FindMy.py's AirTag session, with the password removed. |
 | `airtags/` | AirTag key files. Anyone with these can locate the AirTags. |
 | `last_fmip.json` | The latest raw Find My response, kept for troubleshooting. |
@@ -28,8 +29,13 @@ history.
 
 ### Passwords
 
-- **Apple ID password:** never written to disk. It's typed into the Setup tab and held only in
-  memory while signing in. The keyring is disabled, so pyicloud can't save it there either.
+- **Apple ID password:** not saved unless you tick **Remember password on this computer** when
+  signing in (or choose **Remember password…** while signed in). Then it's written to
+  `data/icloud_secret` (owner-only), so the app can sign back in by itself when Apple ends the
+  session. Apple's trust cookie usually spares a 2FA prompt; if Apple does ask, you get an email.
+  A saved password that Apple rejects is deleted at once, so the app never keeps retrying a wrong
+  one. **Forget saved password** and **Sign out of iCloud** both delete it. Without the tick
+  it's held only in memory while signing in. The keyring is disabled either way.
 - **The page password:** stored as a salted PBKDF2-SHA256 hash (300,000 rounds). Sessions are
   random tokens, kept for 30 days, in an HttpOnly, SameSite=Strict cookie.
 - **Gmail app password:** in `config.toml`. It can only send email, and can be revoked at

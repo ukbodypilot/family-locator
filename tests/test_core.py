@@ -1,5 +1,5 @@
 """Run: FAMLOC_DATA=$(mktemp -d) .venv/bin/python -m pytest -q tests  (or plain python)."""
-import os, sys, tempfile
+import json, os, sys, tempfile
 os.environ.setdefault("FAMLOC_DATA", tempfile.mkdtemp())
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from famloc import config, db, analysis
@@ -499,7 +499,88 @@ def test_quiet_mode_slows_sessions_when_everyone_rests():
     assert all(g <= 5.5 for g in gap(early)), gap(early)
 
 
+def test_resume_network_error_retries_not_need_login():
+    """2026-11-22: a boot-time DNS failure was treated as an expired session and tracking stopped."""
+    import requests
+    from pyicloud.exceptions import PyiCloudConnectionException
+    from famloc import icloud_source
+
+    sent = []
+    class _Alerts:
+        def notify(self, *a, **k): sent.append(a)
+
+    db.set_setting("icloud_apple_id", "someone@example.com")
+    db.set_setting("icloud_need_login_mailed", False)
+    src = icloud_source.ICloudSource(cfg, _Alerts())
+
+    def boom(aid, pw):
+        try:
+            raise requests.ConnectionError("Temporary failure in name resolution")
+        except requests.ConnectionError as inner:
+            raise PyiCloudConnectionException("Request failed to iCloud") from inner
+    src._make = boom
+    src.resume()
+    assert src.state == "error" and src.api is None, src.state
+    assert src._resume_retry_at > 0 and not sent
+
+    api = type("A", (), {"requires_2fa": False, "requires_2sa": False})()
+    src._make = lambda aid, pw: api
+    src.resume()
+    assert src.state == "ok" and src.api is api
+
+    def bad(aid, pw): raise ValueError("bad cookie")
+    src._make = bad
+    src.resume()
+    assert src.state == "need_login" and sent
+    db.set_setting("icloud_apple_id", None)
+
+
+def test_saved_password_store_resume_and_forget():
+    """Remember password: 0600 file outside the DB, used on resume, deleted when Apple rejects it."""
+    import stat
+    from pyicloud.exceptions import PyiCloudFailedLoginException
+    from famloc import icloud_source as ics
+
+    sent = []
+    class _Alerts:
+        def notify(self, *a, **k): sent.append(a)
+    src = ics.ICloudSource(cfg, _Alerts())
+    ok = type("A", (), {"requires_2fa": False, "requires_2sa": False})()
+    seen = []
+    src._make = lambda aid, pw: (seen.append(pw), ok)[1]
+
+    src.login("someone@example.com", "hunter2", remember=True)
+    assert ics.SECRET_PATH.read_text() == "hunter2"
+    assert stat.S_IMODE(ics.SECRET_PATH.stat().st_mode) == 0o600
+    assert src.status()["password_saved"] is True
+    assert "hunter2" not in json.dumps(db.get_setting("cfg_overrides", {}))  # never in the DB
+
+    src.resume()
+    assert seen[-1] == "hunter2" and src.state == "ok"
+
+    tfa = type("A", (), {"requires_2fa": True, "requires_2sa": False})()
+    src._make = lambda aid, pw: tfa
+    db.set_setting("icloud_need_login_mailed", False)
+    src.resume()
+    assert src.state == "need_2fa" and src.api is tfa and sent   # keeps the api for the code
+
+    def wrong(aid, pw): raise PyiCloudFailedLoginException("Invalid email/password combination.")
+    src._make = wrong
+    src.resume()
+    assert src.state == "need_login" and not ics.SECRET_PATH.exists()   # never retry a wrong password
+
+    src._make = lambda aid, pw: ok
+    src.login("someone@example.com", "hunter2", remember=True)
+    src.login("someone@example.com", "hunter2", remember=False)
+    assert not ics.SECRET_PATH.exists()
+    src.login("someone@example.com", "hunter2", remember=True)
+    src.logout()
+    assert not ics.SECRET_PATH.exists()
+    db.set_setting("icloud_apple_id", None)
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):
             f(); print("ok", n)
+

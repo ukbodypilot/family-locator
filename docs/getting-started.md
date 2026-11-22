@@ -87,9 +87,10 @@ On the **Setup** tab, under *iCloud Find My*:
 
 Your devices and your family's devices appear on the **People** tab within a minute.
 
-Your Apple ID password is never saved. Only Apple's session cookies are kept, in
-`data/icloud_session/`, so a restart resumes without a password. When Apple eventually expires
-the session, you get an email asking you to sign in again.
+Apple's session cookies are kept in `data/icloud_session/`, so a restart resumes without a
+password. Your Apple ID password is only saved if you tick **Remember password on this computer**.
+Then the app signs back in by itself when Apple ends the session. Without it, you get an email
+asking you to sign in again. See [Privacy and security](privacy-and-security.md).
 
 Each family member needs location sharing turned on in their Family Sharing settings, or their
 devices show "No location yet".

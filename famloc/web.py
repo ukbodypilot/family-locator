@@ -308,7 +308,12 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
     # ------------------------------------------------------------- iCloud
     @app.post("/api/icloud/login")
     def icloud_login(body: dict = Body(...)):
-        return icloud.login(str(body["apple_id"]).strip(), str(body["password"]))
+        return icloud.login(str(body["apple_id"]).strip(), str(body["password"]),
+                            remember=bool(body.get("remember")))
+
+    @app.post("/api/icloud/forget-password")
+    def icloud_forget_password():
+        return icloud.forget_password()
 
     @app.post("/api/icloud/2fa")
     def icloud_2fa(body: dict = Body(...)):
