@@ -2,6 +2,20 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.8.0] -- 2026-11-22
+
+Survives reboots and expired Apple sessions without you having to sign in again.
+
+- **Remember password (optional).** A tick-box on the iCloud sign-in (or **Remember password…**
+  while signed in) keeps the Apple ID password in `data/icloud_secret`, owner-only and outside the
+  database, so the app signs back in by itself when Apple ends the session. If Apple wants a 2FA
+  code, you get an email and type it on the Setup tab. A saved password Apple rejects is deleted.
+  **Forget saved password** and **Sign out** delete it.
+- **Fix: a network failure at startup no longer stops tracking.** Starting before the network was
+  up (after a reboot) was read as "Apple expired the session": tracking stopped and never retried.
+  Connection errors, timeouts and Apple 5xx now retry from 30 s, doubling to 10 min. A successful
+  resume also re-arms the re-login email, which the false alarm had used up.
+
 ## [1.7.0] -- 2026-11-22
 
 A one-command installer, and a map and timeline that are easier to focus.

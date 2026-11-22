@@ -54,7 +54,9 @@ missing. `./install.sh --update` pulls the latest code and restarts, `--no-servi
 service, and `--uninstall` removes the service but keeps your data.
 
 On first visit you choose a password for the page. Then sign in to iCloud on the **Setup** tab
-with your Apple ID and the 2FA code. Your family's devices appear within a minute. The full
+with your Apple ID and the 2FA code. Your family's devices appear within a minute. Tick
+**Remember password on this computer** if you want the app to sign back in by itself when Apple
+ends the session (see [Privacy and security](docs/privacy-and-security.md)). The full
 walkthrough, including a manual install, is in [Getting started](docs/getting-started.md).
 
 ## Documentation
