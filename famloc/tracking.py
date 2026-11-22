@@ -104,7 +104,7 @@ class Tracker:
     BACKOFF_CAP_MIN = 60
 
     def backoff_factor(self, owner: str) -> int:
-        k = self.streak.get(owner, 0) - self.BACKOFF_AFTER + 1
+        k = self.streak.get(owner, 0) - int(self.cfg.unanswered_backoff_after) + 1
         return 1 if k <= 0 else 2 ** min(k, 6)
 
     def interval_minutes(self, owner: str, now: float) -> float:
@@ -196,7 +196,7 @@ class Tracker:
         with self.lock:
             self._prune(now)
             last_any = max((t for t, _ in self.gov["history"]), default=0)
-            if now - last_any < self.MIN_SPACING_S:
+            if now - last_any < self.cfg.locate_spacing_s:
                 return []
             rank = {"manual": 0, "moving": 1, None: 2}
             for o in sorted(due, key=lambda o: (rank[self.following(o, now)], self.last_sent.get(o, 0))):
@@ -247,10 +247,10 @@ class Tracker:
                 g.update(false_streak=0, level=0, until=0.0, reason="")
             else:
                 g["false_streak"] += 1
-                if g["false_streak"] >= self.THROTTLE_AFTER or g["level"] > 0:
+                if g["false_streak"] >= int(self.cfg.family_throttle_after) or g["level"] > 0:
                     trigger = "probe_failed" if g["level"] > 0 else f"{g['false_streak']}_false_in_a_row"
                     g["level"] = min(g["level"] + 1, 6)
-                    mins = min(self.cfg.family_pause_minutes * 2 ** (g["level"] - 1), self.PAUSE_CAP_MIN)
+                    mins = min(self.cfg.family_pause_minutes * 2 ** (g["level"] - 1), self.cfg.family_pause_cap_minutes)
                     g["until"] = now + mins * 60
                     g["reason"] = f"Apple didn't act on the last {g['false_streak'] or 1} family request(s)"
                     db.log_locate_event("pause", owner, now, level=g["level"], minutes=mins, trigger=trigger,

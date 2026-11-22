@@ -172,11 +172,27 @@ class ICloudSource:
             "SELECT owner, MIN(first_seen) f FROM devices WHERE source='icloud' AND owner IS NOT NULL "
             "AND hidden=0 GROUP BY owner ORDER BY f")]
 
+    _overrides_read = 0.0
+
+    def _refresh_overrides(self, now: float) -> None:
+        """Settings saved in the DB (UI or tuning) apply within a minute, no restart needed."""
+        if now - self._overrides_read < 60:
+            return
+        self._overrides_read = now
+        from . import config as _config
+        before = {k: getattr(self.cfg, k) for k in _config.EDITABLE}
+        _config.apply_overrides(self.cfg, db.get_setting("cfg_overrides", {}))
+        changed = {k: (before[k], getattr(self.cfg, k)) for k in before if before[k] != getattr(self.cfg, k)}
+        if changed:
+            log.info("settings changed: %s", changed)
+            db.log_locate_event("settings", None, now, **{k: v[1] for k, v in changed.items()})
+
     def tick(self, now: float | None = None) -> None:
         from pyicloud.exceptions import (PyiCloud2FARequiredException, PyiCloudAuthRequiredException,
                                          PyiCloudFailedLoginException)
         from .alerts import primary_device
         now = now or time.time()
+        self._refresh_overrides(now)
         with self.lock:
             if self.api is None:
                 return
@@ -185,7 +201,7 @@ class ICloudSource:
                 sent = False
                 for owner in self.tracker.check_timeouts(now):
                     st = self.tracker.status(owner, now)
-                    if st["unanswered_streak"] == self.tracker.BACKOFF_AFTER:
+                    if st["unanswered_streak"] == int(self.cfg.unanswered_backoff_after):
                         log.warning("no new fix from %s after %d requests in a row; backing off (every %s min)",
                                     owner, st["unanswered_streak"], st["effective_minutes"])
                 for owner in self.tracker.select(self.tracker.due(self._owners(), now), now):

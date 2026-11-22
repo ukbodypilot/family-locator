@@ -31,6 +31,10 @@ class Config:
     movement_threshold_m: float = 250.0
     family_locates_per_hour: int = 20     # budget for fresh-location requests to family members' devices
     family_pause_minutes: float = 15.0     # first family-wide pause when Apple stops acting on requests
+    family_throttle_after: int = 3         # isLocating=false replies in a row before a family pause
+    family_pause_cap_minutes: float = 120.0
+    locate_spacing_s: float = 20.0         # minimum gap between any two locate requests
+    unanswered_backoff_after: int = 3      # per person: unanswered requests in a row before slowing them
     with_family: bool = True
 
     # AirTags (FindMy.py)
@@ -99,6 +103,10 @@ EDITABLE = {
     "movement_threshold_m": ("Counts as moving beyond", 100, 2000, "m"),
     "family_locates_per_hour": ("Family budget: fresh locations per hour, all members together", 2, 120, ""),
     "family_pause_minutes": ("Pause family requests when Apple stops acting on them, for", 5, 120, "min"),
+    "family_throttle_after": ("Pause after this many ignored family requests in a row", 1, 10, ""),
+    "family_pause_cap_minutes": ("Longest family pause", 15, 480, "min"),
+    "locate_spacing_s": ("Minimum gap between any two requests", 5, 300, "s"),
+    "unanswered_backoff_after": ("Slow a person down after this many unanswered requests", 1, 20, ""),
     "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
     "low_battery_pct": ("Low battery alert below (0 = off)", 0, 100, "%"),
     "stale_hours": ("Stale device alert after (0 = off)", 0, 720, "h"),

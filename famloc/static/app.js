@@ -1068,7 +1068,7 @@ async function loadEvents() {
   $("#eventList").onclick = (ev2) => { const b = ev2.target.closest("[data-focus]"); if (b) { location.hash = "focus=" + b.dataset.focus; } };
 }
 const ALERT_KEYS = ["quiet_from_hour", "quiet_to_hour", "digest_hour", "low_battery_pct", "stale_hours", "geofence_exit_margin_m", "max_alert_accuracy_m"];
-const TRACK_KEYS = ["locate_minutes", "follow_moving", "moving_locate_minutes", "follow_rest_minutes", "follow_max_hours", "movement_threshold_m", "family_locates_per_hour", "family_pause_minutes", "poll_seconds", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];
+const TRACK_KEYS = ["locate_minutes", "follow_moving", "moving_locate_minutes", "follow_rest_minutes", "follow_max_hours", "movement_threshold_m", "family_locates_per_hour", "family_pause_minutes", "family_throttle_after", "family_pause_cap_minutes", "locate_spacing_s", "unanswered_backoff_after", "poll_seconds", "airtag_poll_minutes", "stay_radius_m", "stay_min_minutes"];
 async function loadConfigForms() {
   const rows = await api("/api/config");
   const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
