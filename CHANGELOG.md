@@ -2,6 +2,16 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.10.0] -- 2026-11-22
+
+Speed everywhere you look at a moving person.
+
+- **Speed on the map marker.** A moving person's name label reads e.g. "Sam 120 km/h · 74 mph".
+  Merged markers (people together) don't show it; open the card for each person.
+- **Speed in the people list.** A moving person's status line shows their average speed too,
+  e.g. "On the move · 62 km/h (39 mph)". Hover it for how many fixes it's based on. It follows
+  the timeline during playback, worked out from the saved fixes; nothing extra is stored.
+
 ## [1.9.0] -- 2026-11-22
 
 See how fast someone is going.
