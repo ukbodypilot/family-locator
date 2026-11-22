@@ -2,18 +2,27 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
-## [Unreleased]
+## [1.7.0] -- 2026-11-22
 
-- **Clicking a person's marker** (or a group of people) on the map centres the map on them,
-  keeping the zoom, and opens their card there.
-- **Timeline:** playback speed and trail length are continuous log-scale sliders, not drop-downs
-  (speed 1 s to 1 hour per second, default 10 min; trail 15 min to 7 days, or whole track), remembered per
-  browser and shown on phones too. Lanes are taller (28 px, 20 px on phones) with more room
-  around them.
+A one-command installer, and a map and timeline that are easier to focus.
+
+- **Installer.** `./install.sh` checks for Python 3.11+, creates `.venv` and installs the
+  packages, sets up an owner-only `data/` with a starter `config.toml`, and installs and starts a
+  systemd user service pointing at wherever you cloned it. Safe to re-run. `--update` pulls and
+  restarts, `--no-service` skips the service, `--uninstall` removes it and keeps your data. Getting
+  started and the README now use it; the manual steps are still documented.
 - **Show or hide people and devices on the map.** An eye button on each person and device, **Show
   only (name)** in a person's menu, and a **Show all** bar while anything is hidden. Hiding a
   device takes it out of the person's position, e.g. an iPad left at home. Saved per browser;
   alerts and tracking are unchanged.
+- **Timeline sliders.** Playback speed and trail length are continuous log-scale sliders instead
+  of drop-downs: speed 1 s (real time) to 1 hour per second, default 10 min; trail 15 min to 7
+  days, or whole track at the far right. Remembered per browser, and shown on phones too.
+- **Roomier timeline.** Lanes are 28 px tall (20 px on phones, were 16 and 12), with more space
+  around them and larger names and time labels.
+- **Clicking a person's marker** (or a group of people) centres the map on them, keeping the zoom,
+  and opens their card there.
+- Screenshots updated.
 
 ## [1.6.0] -- 2026-11-21
 

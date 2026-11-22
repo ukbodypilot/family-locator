@@ -10,6 +10,17 @@ journalctl --user-unit family-locator -n 100
 On this machine the system journal is kept in memory, so use `--user-unit`.
 `journalctl --user -u ...` can show nothing.
 
+## The installer stops with an error
+
+- **"Python 3.11 or newer is needed"** or **"venv module is missing":** install a newer Python
+  (Debian/Ubuntu: `sudo apt install python3 python3-venv`), or point the installer at one with
+  `PYTHON=python3.12 ./install.sh`.
+- **"no systemd user session here":** common over plain `su` or in containers. The app is
+  installed anyway; start it with `.venv/bin/python -m famloc.main`, or log in normally and re-run.
+- **"the service didn't start":** read the reason with `journalctl --user-unit family-locator -n 50`.
+  A port already in use is the usual one; change `port` in `data/config.toml` and re-run.
+- **The app stops when you log out:** run `sudo loginctl enable-linger $USER`.
+
 ## Blank page, or "Family Locator didn't start"
 
 If the app can't start, the page shows the error after 8 seconds and sends it to the log:

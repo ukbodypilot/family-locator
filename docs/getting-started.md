@@ -5,22 +5,53 @@ This guide takes you from a fresh checkout to a running app with your family on 
 ## 1. Install
 
 ```bash
-git clone https://github.com/ukbodypilot/family-locator ~/Downloads/family-locator
-cd ~/Downloads/family-locator
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+git clone https://github.com/ukbodypilot/family-locator ~/family-locator
+cd ~/family-locator
+./install.sh
 ```
 
-Everything the app keeps lives in `data/`. That folder isn't in git, and the app sets it to
-owner-only permissions.
+The installer:
+
+1. checks for Python 3.11 or newer with the `venv` module (on Debian or Ubuntu:
+   `sudo apt install python3-venv`);
+2. creates `.venv` and installs the packages from `requirements.txt`;
+3. creates `data/` with owner-only permissions, and `data/config.toml` from the example if there
+   isn't one;
+4. installs `~/.config/systemd/user/family-locator.service` pointing at this folder, enables it
+   and starts it;
+5. prints the address to open.
+
+It's safe to run again: it only adds what's missing and never touches your data. Options:
+
+| Command | What it does |
+|---|---|
+| `./install.sh` | Install and start the service |
+| `./install.sh --no-service` | Install without the service; start the app with `.venv/bin/python -m famloc.main` |
+| `./install.sh --update` | `git pull`, update packages, restart the service |
+| `./install.sh --uninstall` | Stop and remove the service; keeps the code and `data/` |
+
+If it warns that lingering is off, run `sudo loginctl enable-linger $USER` so the app keeps running
+after you log out and starts at boot.
+
+Everything the app keeps lives in `data/`. That folder isn't in git.
+
+<details>
+<summary>Manual install, without the script</summary>
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+mkdir -p data && chmod 700 data && cp config.example.toml data/config.toml
+.venv/bin/python -m famloc.main
+```
+
+For the service, copy `deploy/family-locator.service` to `~/.config/systemd/user/`, change the two
+paths in it to your folder, then `systemctl --user daemon-reload && systemctl --user enable --now family-locator`.
+</details>
 
 ## 2. Configure email (optional, but you'll want alerts)
 
-```bash
-mkdir -p data && cp config.example.toml data/config.toml
-```
-
-Edit `data/config.toml` and fill in the `[email]` section:
+The installer created `data/config.toml`. Edit it and fill in the `[email]` section:
 
 ```toml
 [email]
@@ -36,9 +67,8 @@ Every other setting can be changed later in the app. See [Configuration](configu
 
 ## 3. Start it
 
-```bash
-.venv/bin/python -m famloc.main
-```
+The installer has already started the service. If you changed `data/config.toml`, restart it with
+`systemctl --user restart family-locator`. (With `--no-service`, run `.venv/bin/python -m famloc.main`.)
 
 Open `http://<this machine's address>:8790` in a browser.
 
@@ -79,16 +109,8 @@ Start with Home. See [Alerts](alerts.md) for who gets alerted and when.
 
 ## 7. Run it as a service
 
-On the gateway machine the app runs as a systemd user service. Lingering is on, so it starts at
-boot without anyone logging in.
-
-```bash
-ln -sf ~/Downloads/family-locator/deploy/family-locator.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now family-locator
-```
-
-Useful commands:
+`./install.sh` already set this up: a systemd user service, enabled so it starts at boot (with
+lingering on). Useful commands:
 
 ```bash
 systemctl --user status family-locator
@@ -103,10 +125,8 @@ To reach the app from outside the house, see [Phone access](phone-access.md).
 ## Updating
 
 ```bash
-cd ~/Downloads/family-locator
-git pull
-.venv/bin/pip install -r requirements.txt
-systemctl --user restart family-locator
+cd ~/family-locator
+./install.sh --update
 ```
 
 The database is upgraded automatically on start. Browsers pick up the new version on their next

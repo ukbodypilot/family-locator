@@ -42,16 +42,20 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
 ## Quick start
 
 ```bash
-git clone https://github.com/ukbodypilot/family-locator ~/Downloads/family-locator
-cd ~/Downloads/family-locator
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-mkdir -p data && cp config.example.toml data/config.toml   # add Gmail details for alerts
-.venv/bin/python -m famloc.main                            # then open http://<this machine>:8790
+git clone https://github.com/ukbodypilot/family-locator ~/family-locator
+cd ~/family-locator
+./install.sh          # then open the address it prints (port 8790)
 ```
+
+The installer checks for Python 3.11+, creates `.venv` and installs the packages, sets up an
+owner-only `data/` folder with a starter `data/config.toml` (add Gmail details there for alerts),
+and installs and starts a systemd user service. Run it again at any time; it only adds what's
+missing. `./install.sh --update` pulls the latest code and restarts, `--no-service` skips the
+service, and `--uninstall` removes the service but keeps your data.
 
 On first visit you choose a password for the page. Then sign in to iCloud on the **Setup** tab
 with your Apple ID and the 2FA code. Your family's devices appear within a minute. The full
-walkthrough, including running it as a service, is in [Getting started](docs/getting-started.md).
+walkthrough, including a manual install, is in [Getting started](docs/getting-started.md).
 
 ## Documentation
 
@@ -72,7 +76,8 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
-- Python 3.11 or newer (developed on 3.14, Arch Linux).
+- Linux with Python 3.11 or newer (developed on 3.14, Arch Linux). systemd for the service;
+  without it, start the app by hand.
 - An Apple ID in a Family Sharing group, with location sharing turned on by each member.
 - For email: a Gmail address with an [app password](https://myaccount.google.com/apppasswords).
 - For phone access from outside the home: the radio gateway with its Cloudflare tunnel (see
