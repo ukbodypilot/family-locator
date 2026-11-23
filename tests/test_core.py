@@ -74,6 +74,31 @@ def test_person_dedupe_phone_and_watch():
     assert [e for _, e in sent] == [True, False], "second device of same person must not email"
 
 
+def test_late_device_does_not_report_an_old_crossing():
+    """A laptop asleep in the bag: its last fix is at School, its next one at Home. The phone already
+    sent 'left School' and 'arrived Home'; the laptop's late 'left School' must not email."""
+    for i, cls in (("p2", "iPhone"), ("m2", "Mac")):
+        db.upsert_device(f"icloud:{i}", "icloud", f"Sam {cls}", owner="Sam", device_class=cls)
+    sch = db.x("INSERT INTO geofences(name,lat,lon,radius) VALUES('School2',41.0,-100.0,150)").lastrowid
+    hom = db.x("INSERT INTO geofences(name,lat,lon,radius) VALUES('Home2',41.05,-100.0,150)").lastrowid
+    phone, mac = (db.q1("SELECT * FROM devices WHERE id=?", (i,)) for i in ("icloud:p2", "icloud:m2"))
+    sent = []
+    orig = al.notify
+    al.notify = lambda kind, subj, msg, **kw: (sent.append((subj, kw.get("email", True))), orig(kind, subj, msg, **kw))
+    try:
+        for d in (phone, mac):
+            al.check_fix(d, 1000, 41.0, -100.0, 10)           # both learn: at School, not Home
+        al.check_fix(phone, 2000, 41.01, -100.0, 10)          # phone leaves School
+        al.check_fix(phone, 3400, 41.05, -100.0, 10)          # phone arrives Home
+        al.check_fix(mac, 3600, 41.05, -100.0, 10)            # laptop wakes up at Home, 27 min later
+        al.check_fix(phone, 9000, 41.0, -100.0, 10)           # next day-ish: phone back at School
+        al.check_fix(phone, 9500, 41.01, -100.0, 10)          # and leaves again: real news
+    finally:
+        al.notify = orig
+    emailed = [s for s, e in sent if e]
+    assert emailed == ["Sam left School2", "Sam arrived at Home2", "Sam left Home2",
+                       "Sam arrived at School2", "Sam left School2"], sent   # left before arrived, same fix
+
 def test_people_filter():
     db.upsert_device("icloud:o1", "icloud", "Other", owner="Other", device_class="iPhone")
     gid = db.x("INSERT INTO geofences(name,lat,lon,radius,people) VALUES('Only kid',41.0,-100.0,150,'[\"Kid\"]')").lastrowid

@@ -134,14 +134,24 @@ class Alerter:
         h = time.localtime(now or time.time()).tm_hour
         return a <= h < b if a < b else (h >= a or h < b)
 
-    def _person_already_alerted(self, owner: str | None, geofence_id: int, kind: str, ts: float) -> bool:
-        """Phone and watch cross a fence together; alert once per person."""
+    def _person_already_alerted(self, owner: str | None, geofence_id: int, kind: str, ts: float,
+                                dev_id: str | None = None, prev_since: float | None = None) -> bool:
+        """Phone and watch cross a fence together; alert once per person. A device that was asleep
+        (a laptop in a bag) reports the crossing late: if the person's other devices already said
+        so since this device last changed state, it is old news, however late it comes."""
         if not owner:
             return False
         win = self.cfg.person_dedupe_minutes * 60
         r = db.q1("SELECT e.id FROM events e JOIN devices d ON d.id=e.device_id WHERE e.geofence_id=? "
                   "AND e.kind=? AND d.owner=? AND ABS(e.ts-?)<=?", (geofence_id, kind, owner, ts, win))
-        return r is not None
+        if r is not None:
+            return True
+        if dev_id is None or prev_since is None:
+            return False
+        last = db.q1("SELECT e.kind FROM events e JOIN devices d ON d.id=e.device_id WHERE e.geofence_id=? "
+                     "AND d.owner=? AND e.device_id<>? AND e.kind IN ('enter','exit') AND e.ts>=? AND e.ts<=? "
+                     "ORDER BY e.ts DESC LIMIT 1", (geofence_id, owner, dev_id, prev_since, ts))
+        return last is not None and last["kind"] == kind
 
     # ---------- per-fix checks ----------
     def check_fix(self, dev: dict, ts: float, lat: float, lon: float, acc: float | None) -> None:
@@ -149,7 +159,9 @@ class Alerter:
         if acc is not None and acc > self.cfg.max_alert_accuracy_m:
             return
         acc = acc or 0.0
-        for g in db.q("SELECT * FROM geofences"):
+        # fences this device is inside first: one fix that crosses two fences says "left" before "arrived"
+        for g in db.q("SELECT g.* FROM geofences g LEFT JOIN fence_state fs ON fs.geofence_id=g.id AND fs.device_id=? "
+                      "ORDER BY COALESCE(fs.inside, 0) DESC, g.id", (dev["id"],)):
             people = json.loads(g["people"]) if g.get("people") else []
             devs = json.loads(g["devices"]) if g["devices"] else []
             if (people or devs) and dev.get("owner") not in people and dev["id"] not in devs:
@@ -199,7 +211,7 @@ class Alerter:
                 db.x("UPDATE fence_state SET inside=1, since=? WHERE geofence_id=? AND device_id=?",
                      (ts, g["id"], dev["id"]))
                 if g["on_enter"]:
-                    dup = self._person_already_alerted(dev.get("owner"), g["id"], "enter", ts)
+                    dup = self._person_already_alerted(dev.get("owner"), g["id"], "enter", ts, dev["id"], st["since"])
                     self.notify("enter", f"{who} arrived at {g['name']}",
                                 f"{who} arrived at {g['name']} at {when}{via}.\n\n{links(self.cfg, focus)}\nMap: {maps}",
                                 device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup)
@@ -207,7 +219,7 @@ class Alerter:
                 db.x("UPDATE fence_state SET inside=0, since=? WHERE geofence_id=? AND device_id=?",
                      (ts, g["id"], dev["id"]))
                 if g["on_exit"]:
-                    dup = self._person_already_alerted(dev.get("owner"), g["id"], "exit", ts)
+                    dup = self._person_already_alerted(dev.get("owner"), g["id"], "exit", ts, dev["id"], st["since"])
                     self.notify("exit", f"{who} left {g['name']}",
                                 f"{who} left {g['name']} at {when}{via} (now {d:.0f} m away).\n\n{links(self.cfg, focus)}\nMap: {maps}",
                                 device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup)

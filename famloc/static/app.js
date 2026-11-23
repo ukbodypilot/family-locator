@@ -393,7 +393,7 @@ function avgSpeed(pos, t = S.t) {
   if (!pts.length || pts[pts.length - 1][0] < pos.p[0]) pts.push(pos.p);   // live fix not loaded yet
   pts = pts.filter((q) => q[3] == null || q[3] <= SPEED_MAX_ACC);         // a 400-1600 m cell guess zig-zags the path
   const last = pts[pts.length - 1];
-  if (t - last[0] > SPEED_FRESH) return null;
+  if (!last || t - last[0] > SPEED_FRESH) return null;   // all recent fixes rough: no speed
   let k = pts.length - 1;                                  // walk back: 3 fixes, more until 3 min
   while (k > 0 && pts[k][0] - pts[k - 1][0] <= 35 * 60
          && (pts.length - k < SPEED_MIN_FIXES || last[0] - pts[k][0] < SPEED_MIN_SPAN)) k--;
