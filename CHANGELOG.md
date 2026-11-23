@@ -2,7 +2,9 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
-## [Unreleased]
+## [1.12.0] -- 2026-11-23
+
+Rough fixes handled properly (no false alerts, no spaghetti), and an open page that stays fresh.
 
 - **Fix: a page left open went stale until reloaded.** After a long time away (PC asleep, network
   dropped), the map could keep showing hours-old positions: one request had hung, and the live
