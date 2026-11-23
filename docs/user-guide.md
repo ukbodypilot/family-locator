@@ -127,6 +127,28 @@ Your choices are remembered in this browser.
   cursor, anywhere from 15 minutes to 7 days, or the whole track at the far right. Both are
   continuous on a log scale, so the short end has as much room as the long end. Both are remembered in your browser.
 
+## A new driver in the family
+
+Set-up for keeping an eye on a teen who has started driving:
+
+1. **Places.** Add the places they drive to: School, Work, a friend's house, the gym. You get an
+   email on every arrival and departure. A place can be limited to just them (see [Places](#places)).
+2. **Tracking.** On the Setup tab, set their **Follow while moving** to **On**. Whenever their phone
+   starts moving it's located every 2 minutes until it stops, so drives have a detailed track and
+   an up-to-date speed. Following starts at their first fix after they set off, so also give them
+   a shorter **Fresh location** (5 minutes, say) to catch the start of short trips. See
+   [Tracking and following](tracking.md).
+3. **Speed colours.** Keep **Tracks coloured by speed** on (it is by default). Pick **24h** or
+   **7d** on the timeline and look for orange and red stretches: orange is 50–75 mph, red is
+   over 75. Hover a stretch to see its band.
+4. **Replay a trip.** Drag the timeline to the start of a drive and press play. Their marker shows
+   their speed as it goes, and clicking them keeps the map centred on them.
+5. **Insights.** Pick their phone for the trips list with each trip's distance and average speed.
+
+Speeds are averaged over the last few fixes (at least 3 minutes), so a short burst of speed is
+smoothed out, and a gap of more than 15 minutes shows as grey "no speed" rather than a guess. It's
+a picture of how they drive, not a speed camera, and it isn't a crash detector.
+
 ## Search
 
 Type a name, a device, a place, an address or coordinates (`37.77, -122.42`). People, devices and

@@ -44,6 +44,27 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
 | **Heatmap** | **Places** |
 | ![Heatmap of 30 days: home, the park and the routes between](docs/images/heatmap.png) | ![The Places tab with saved places and their circles on the map](docs/images/places.png) |
 
+## Keeping an eye on a new driver
+
+A common reason to run Family Locator is a teenager who has just started driving. It answers the
+questions a parent actually has:
+
+- **Did they get there?** Make School, Work or a friend's house a place, and you get an email when
+  they arrive and when they leave. No need to text "are you there yet?" while they're behind the
+  wheel.
+- **How do they drive?** Every trip is on the map, coloured by speed. A stretch of red on a road
+  that should be green is easy to spot, and you can play the trip back with the timeline to see
+  where and when.
+- **Where are they right now?** Click them and the map follows along, with their current speed on
+  the marker. Turn on **Follow while moving** for them on the Setup tab, and their phone is
+  located every 2 minutes whenever they're on the road.
+- **What happened today?** The evening summary lists where each person went and how far.
+
+Speeds are averages over the last few Find My fixes, a couple of minutes apart. That's good for
+"they did 80 on the freeway" but not for a single burst of speed, and it isn't a crash detector.
+It works best as something you've agreed on together: they already share their location with the
+family through Find My, and a coloured track makes a calm conversation easier than a guess.
+
 ## Quick start
 
 ```bash
