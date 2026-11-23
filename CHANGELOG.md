@@ -2,6 +2,12 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [Unreleased]
+
+- **New screenshots, in dark mode,** showing speed-coloured tracks, playback following someone at
+  75 mph, the heatmap, places and the phone layout. The demo seeder (`tools/seed_demo.py`) adds a
+  drive, a bike ride and walks on real road geometry so every speed band appears.
+
 ## [1.11.0] -- 2026-11-22
 
 Usable on a phone, the map follows who you click, and tracks are coloured by speed.

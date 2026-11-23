@@ -93,6 +93,7 @@ Every map zooms to level 22. Past a map's real detail, its last tiles are enlarg
 |---|---|
 | People and items | Person markers and AirTags. |
 | Tracks | Each person's path, from their main device. |
+| Tracks coloured by speed | On by default. Colours each track by how fast they were going: purple walking (under 4 mph), blue to 10, green to 25, yellow to 50, orange to 75, red above. Grey dashes where no speed can be trusted (more than 15 minutes between fixes, or a rough fix). A legend sits bottom left; hover a stretch for its band. |
 | Accuracy circles | How precise each person's fix is. |
 | Every device separately | A small dot for every device, not just each person. |
 | Every fix as a dot | Every saved fix in the range; click one for details. |
@@ -103,6 +104,8 @@ Every map zooms to level 22. Past a map's real detail, its last tiles are enlarg
 | Railways (OpenRailwayMap) | Rail, metro and tram lines on top of any base map, including satellite. |
 
 Your choices are remembered in this browser.
+
+![The heatmap layer over 30 days: the hot spots are home, the park and the routes between](images/heatmap.png)
 
 ## The timeline
 

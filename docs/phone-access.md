@@ -1,6 +1,8 @@
 # Phone access
 
-![The app on a phone](images/phone-map.png)
+<img src="images/phone-map.png" alt="The map on a phone, with the timeline folded to one row" width="300"> <img src="images/phone-people.png" alt="The people panel as a bottom sheet on a phone" width="300">
+
+On a phone the timeline folds to one row (range and play); the arrow at its end opens the sliders and lanes. ☰ opens the people panel as a sheet.
 
 On the home network, open `http://<machine>:8790` on any phone. From anywhere else, the app goes
 through the **radio gateway**, which is already reachable from the internet over a Cloudflare tunnel.

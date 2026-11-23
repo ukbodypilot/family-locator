@@ -47,11 +47,93 @@ db.upsert_device("icloud:demo3", "icloud", "Sam's Watch", owner="Sam", model="Ap
 walk("icloud:demo1", lambda h, wd: "Work" if 9 <= h < 17 and wd < 5 else ("Gym" if h == 18 else "Home"))
 walk("icloud:demo2", lambda h, wd: "School" if 8 <= h < 15 and wd < 5 else ("Park" if 15 <= h < 17 else "Home"))
 walk("icloud:demo3", lambda h, wd: "School" if 8 <= h < 15 and wd < 5 else "Home", step_s=900)
+# Trips inside the last 24 h on real road geometry (tools/demo_routes.json: routes from
+# routing.openstreetmap.de, map data (c) OpenStreetMap contributors, ODbL), so
+# the speed-coloured tracks show every band: city streets, freeway, a bike ride and walks.
+import json  # noqa: E402
+
+ROUTES = json.loads((Path(__file__).with_name("demo_routes.json")).read_text())
+
+
+def follow(route, t0, pace, step_s=60, reverse=False):
+    """Fixes every ~step_s along route ([lat, lon, t]); pace(mph_at_free_flow) -> multiplier."""
+    pts = route[::-1] if reverse else route
+    if reverse:
+        end = route[-1][2]
+        pts = [[la, lo, end - t] for la, lo, t in pts]
+    # retime each segment by the pace function (OSRM free-flow speed in, demo speed out)
+    out, tt = [(pts[0][0], pts[0][1], 0.0)], 0.0
+    for (a, b, ta), (c, d, tb) in zip(pts, pts[1:]):
+        dt = max(tb - ta, 0.01)
+        mph = math.dist((a, b), (c, d)) * 111_000 / dt * 2.2369
+        tt += dt / pace(mph)
+        out.append((c, d, tt))
+    fixes, k, t = [], 0, 0.0
+    while t <= out[-1][2]:
+        while out[k + 1][2] < t:
+            k += 1
+        (a, b, ta), (c, d, tb) = out[k], out[k + 1]
+        f = 0 if tb == ta else (t - ta) / (tb - ta)
+        fixes.append((t0 + t, a + (c - a) * f, b + (d - b) * f))
+        t += step_s + random.randint(-8, 8)
+    return fixes, t0 + out[-1][2]
+
+
+def wander(centre, t0, minutes, mph=2.4, step_s=60):
+    fixes, pos, hdg, t = [], centre, random.uniform(0, 6.28), t0
+    while t < t0 + minutes * 60:
+        hdg += random.gauss(0, 0.6)
+        if math.dist(pos, centre) > 0.002:
+            hdg = math.atan2(centre[0] - pos[0], centre[1] - pos[1])
+        step = mph / 2.2369 * step_s / 111_000
+        pos = (pos[0] + step * math.sin(hdg), pos[1] + step * math.cos(hdg))
+        fixes.append((t, *pos)); t += step_s + random.randint(-5, 5)
+    return fixes, t
+
+
+def lay(dev_ids, fixes):
+    """Replace everything from the trip's start until now: the trip, then at home (no straight-line
+    schedule walks across town after it)."""
+    lo, hi = fixes[0][0], fixes[-1][0]
+    t, rest = hi + 300, []
+    while t < now:
+        rest.append((t, HOME[0] + random.gauss(0, 0.0001), HOME[1] + random.gauss(0, 0.0001))); t += 300 + random.randint(-30, 30)
+    fixes = fixes + rest
+    for dev in dev_ids:
+        db.x("DELETE FROM points WHERE device_id=? AND ts > ?", (dev, lo - 600))
+        for t, la, lon in fixes:
+            if t < now:
+                db.add_point(dev, t, la + random.gauss(0, 0.00003), lon + random.gauss(0, 0.00003),
+                             acc=random.choice([5, 5, 10, 16]), kind="GPS")
+
+
+def car(mph):   # free-flow -> demo: a bit of traffic in town, quick on the freeway
+    return 1.45 if mph > 50 else (0.8 if mph > 30 else 0.55) * random.uniform(0.8, 1.2)
+
+
+lt = time.localtime(now)                              # trips in daylight: the last 10:00 that leaves room
+day10 = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 10, 0, 0, 0, 0, -1))
+if now - day10 < 7 * 3600:
+    day10 -= 86400
+t = day10                                            # Alex: SF -> Stanford, a walk, lunch, home
+out, t = follow(ROUTES["drive"], t, car)
+walk1, t2 = follow(ROUTES["walk"], t + 900, lambda mph: 1.0)
+stay, _ = wander(tuple(ROUTES["walk"][0][:2]), t2, 110, mph=0.4, step_s=300)
+back, t3 = follow(ROUTES["drive"], t2 + 112 * 60, car, reverse=True)
+lay(["icloud:demo1"], out + walk1 + stay + back)
+t = day10 + 3.5 * 3600                               # Sam: bike to the park, walk about, bike back
+ride, t = follow(ROUTES["bike"], t, lambda mph: 1.4 * random.uniform(0.85, 1.15))
+park, t = wander(tuple(ROUTES["bike"][-1][:2]), t, 60)
+home, _ = follow(ROUTES["bike"], t, lambda mph: 1.3 * random.uniform(0.85, 1.15), reverse=True)
+lay(["icloud:demo2", "icloud:demo3"], ride + park + home)
+
 db.upsert_device("photos:icloud", "photos", "iCloud Photos", owner="Alex", model="Photo GPS", device_class="Photos")
 for i in range(300):
     p = random.choice(list(PLACES.values()))
     db.add_point("photos:icloud", now - random.uniform(0, 400 * 86400), p[0] + random.gauss(0, 0.01), p[1] + random.gauss(0, 0.01), kind="photo")
-for name, color, r in (("Home", "#577f5b", 150), ("School", "#b7791f", 200), ("Work", "#3f7fa3", 250)):
+PLACES["Stanford"] = tuple(ROUTES["walk"][0][:2])
+for name, color, r in (("Home", "#577f5b", 150), ("School", "#b7791f", 200), ("Work", "#3f7fa3", 250),
+                       ("Gym", "#8a5a9e", 120), ("Park", "#4f8a3c", 400), ("Stanford", "#a8432f", 600)):
     la, lo = PLACES[name]
     db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices,people) VALUES(?,?,?,?,?,1,1,'[]','[]')",
          (name, la, lo, r, color))

@@ -4,7 +4,7 @@ Where everyone in the family is, where they've been, and an email when they arri
 Family Locator is a self-hosted app for an iCloud Family Sharing group. It keeps a history of Find
 My locations, shows people on a map and a per-person timeline, and sends alerts and a daily summary.
 
-![Family Locator on a desktop: people list, map with tracks, and the per-person timeline](docs/images/overview.png)
+![Family Locator in dark mode: people list, a day's drive coloured by speed, and the per-person timeline](docs/images/overview.png)
 
 *Screenshots use made-up demo data.*
 
@@ -18,6 +18,9 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
   one marker.
 - **Timeline lanes.** One row per person, coloured by where they were. Drag the timeline to see
   any moment, or press play to watch a day go by.
+- **Speed, in colour.** Tracks are coloured by speed, from purple walking to red on the freeway, and
+  anyone on the move shows their average speed on their marker and in the list. Click someone and
+  the map follows them.
 - **Places and alerts.** Draw Home, School or Work, then get an email when someone arrives or
   leaves. You can limit a place to certain people, for example "only Sam at School".
 - **Follows people while they move.** Each person has their own fresh-location interval. When
@@ -35,9 +38,11 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
 - **Extras.** AirTag history through FindMy.py (needs keys from a Mac). Past locations backfilled
   from iCloud Photos or a photo folder.
 
-| History with the timeline | On a phone |
+| Playback with the timeline | On a phone |
 |---|---|
-| ![Viewing a past moment: banner with Back to now, hover details on a timeline lane](docs/images/history-lanes.png) | ![Phone layout: map with the people panel as a bottom sheet](docs/images/phone-people.png) |
+| ![Playback on the freeway: the map follows Alex, the marker shows 75 mph, the track is coloured by speed](docs/images/history-lanes.png) | ![Phone layout: full-screen map, speed legend and the folded timeline](docs/images/phone-map.png) |
+| **Heatmap** | **Places** |
+| ![Heatmap of 30 days: home, the park and the routes between](docs/images/heatmap.png) | ![The Places tab with saved places and their circles on the map](docs/images/places.png) |
 
 ## Quick start
 
