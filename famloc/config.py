@@ -36,7 +36,7 @@ class Config:
     locate_spacing_s: float = 20.0         # minimum gap between any two locate requests
     unanswered_backoff_after: int = 3      # per person: unanswered requests in a row before slowing them
     session_renew_minutes: float = 5.0     # start a fresh Find My web session this often (Apple's sessionLifespan is 15 min); 0 = never
-    session_renew_moving_minutes: float = 2.0  # ...this often while any family member is moving (floor 2)
+    session_renew_moving_minutes: float = 2.0  # ...this often while any family member is moving (floor 1)
     session_renew_quiet_minutes: float = 10.0  # ...this often once every family member has been at rest for quiet_after_minutes
     quiet_after_minutes: float = 30.0
     with_family: bool = True
@@ -55,6 +55,7 @@ class Config:
     stale_hours: float = 12.0  # alert when a device has not reported for this long (0 = off)
     geofence_exit_margin_m: float = 50.0  # hysteresis so a fix on the boundary doesn't flap
     max_alert_accuracy_m: float = 500.0  # ignore fixes worse than this for geofence decisions
+    rough_accuracy_m: float = 50.0       # a fix worse than this must be confirmed before it alerts or starts following
 
     quiet_from_hour: int = -1  # no alert EMAILS from this hour... (-1 = no quiet hours)
     quiet_to_hour: int = -1    # ...until this hour (local). Events are still logged.
@@ -112,7 +113,7 @@ EDITABLE = {
     "locate_spacing_s": ("Minimum gap between any two requests", 5, 300, "s"),
     "unanswered_backoff_after": ("Slow a person down after this many unanswered requests", 1, 20, ""),
     "session_renew_minutes": ("Renew the Find My session every (0 = never)", 0, 60, "min"),
-    "session_renew_moving_minutes": ("...while a family member is moving, every", 2, 15, "min"),
+    "session_renew_moving_minutes": ("...while a family member is moving, every", 1, 15, "min"),
     "session_renew_quiet_minutes": ("...when the whole family has been at rest a while, every", 2, 15, "min"),
     "quiet_after_minutes": ("Counts as quiet after everyone has been at rest for", 10, 240, "min"),
     "airtag_poll_minutes": ("AirTag fetch every", 5, 1440, "min"),
@@ -123,6 +124,7 @@ EDITABLE = {
     "digest_hour": ("Daily summary email at (-1 = off)", -1, 23, "h"),
     "geofence_exit_margin_m": ("Leave-alert margin beyond radius", 0, 1000, "m"),
     "max_alert_accuracy_m": ("Ignore fixes worse than", 20, 5000, "m"),
+    "rough_accuracy_m": ("Confirm a fix before alerting or following when it is worse than", 10, 1000, "m"),
     "stay_radius_m": ("Stay radius", 25, 2000, "m"),
     "stay_min_minutes": ("Stay minimum duration", 1, 600, "min"),
 }

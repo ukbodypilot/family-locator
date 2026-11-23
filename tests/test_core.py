@@ -579,6 +579,41 @@ def test_saved_password_store_resume_and_forget():
     db.set_setting("icloud_apple_id", None)
 
 
+def test_rough_fix_alone_never_alerts():
+    """2026-11-23: a 427 m cell guess ~1 km out, between 9 m GPS fixes at the place, emailed
+    "<person> left <place>". A rough fix now needs confirming; a contradicting fix drops it."""
+    db.upsert_device("icloud:rough", "icloud", "Rough phone", owner="Rough")
+    dev = db.q1("SELECT * FROM devices WHERE id='icloud:rough'")
+    gid = db.x("INSERT INTO geofences(name,lat,lon,radius,on_enter,on_exit,people) VALUES('College',37.7749,-122.4194,300,1,1,'[\"Rough\"]')").lastrowid
+    a = Alerter(config.Config(email_enabled=False))
+    a.check_fix(dev, 1000, 37.7749, -122.4194, 9)        # inside: initial state
+    a.check_fix(dev, 1060, 37.7662, -122.4265, 427)      # rough, ~1.1 km out: waits
+    a.check_fix(dev, 1066, 37.7749, -122.4194, 9)        # good, inside: drops it
+    assert not db.q("SELECT * FROM events WHERE geofence_id=?", (gid,))
+    a.check_fix(dev, 2000, 37.7662, -122.4265, 300)      # a real departure that starts rough...
+    assert not db.q("SELECT * FROM events WHERE geofence_id=?", (gid,))
+    a.check_fix(dev, 2120, 37.7612, -122.4318, 10)       # ...confirmed by a good fix outside
+    ev = db.q("SELECT kind, ts FROM events WHERE geofence_id=?", (gid,))
+    assert [(e["kind"], e["ts"]) for e in ev] == [("exit", 2000)], ev   # carries the first sighting
+    for t in (3000, 3300, 3601):                         # rough-only coverage: confirmed after 10 min
+        a.check_fix(dev, t, 37.7749, -122.4194, 200)
+    assert [e["kind"] for e in db.q("SELECT kind FROM events WHERE geofence_id=? ORDER BY ts", (gid,))] == ["exit", "enter"]
+
+
+def test_tracker_ignores_a_rough_spike():
+    from famloc.tracking import Tracker, trusted
+    t = Tracker(config.Config(movement_threshold_m=250, follow_rest_minutes=10, rough_accuracy_m=50))
+    home = [(1000 + 120 * i, 37.7749, -122.4194, 9) for i in range(5)]
+    spike = (1500, 37.7662, -122.4265, 427)
+    seq = sorted(home[:4] + [spike])
+    assert not t.on_fixes("Sp", seq, 1500)                     # newest is rough and unconfirmed
+    seq2 = sorted(home + [spike])
+    assert not t.on_fixes("Sp", seq2, 1500 + 200)              # confirmed as an out-and-back jump
+    assert spike not in trusted(seq2, 50)
+    drive = [(5000 + 60 * i, 37.77 + 0.004 * i, -122.42, 80 if i % 2 else 10) for i in range(6)]
+    assert t.on_fixes("Dr", drive, drive[-1][0])               # a real drive with rough fixes still counts
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

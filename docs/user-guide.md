@@ -93,10 +93,10 @@ Every map zooms to level 22. Past a map's real detail, its last tiles are enlarg
 |---|---|
 | People and items | Person markers and AirTags. |
 | Tracks | Each person's path, from their main device. |
-| Tracks coloured by speed | On by default. Colours each track by how fast they were going: purple walking (under 4 mph), blue to 10, green to 25, yellow to 50, orange to 75, red above. Grey dashes where no speed can be trusted (more than 15 minutes between fixes, or a rough fix). A legend sits bottom left; hover a stretch for its band. |
+| Tracks coloured by speed | On by default. Colours each track by how fast they were going: purple walking (under 4 mph), blue to 10, green to 25, yellow to 50, orange to 75, red above. Grey dashes where no speed can be trusted (more than 15 minutes between fixes). A legend sits bottom left; hover a stretch for its band. Click anywhere on a track to see the nearest fix and its accuracy circle. |
 | Accuracy circles | How precise each person's fix is. |
 | Every device separately | A small dot for every device, not just each person. |
-| Every fix as a dot | Every saved fix in the range; click one for details. |
+| Every fix as a dot | Every saved fix in the range; click one for details and its accuracy circle. Fixes left out as outliers show as dashed grey rings. |
 | Heatmap | Where people spend time. |
 | Stays (from Insights) | The stays of the device open in Insights. |
 | Places | Your saved places and their names. |
@@ -104,6 +104,15 @@ Every map zooms to level 22. Past a map's real detail, its last tiles are enlarg
 | Railways (OpenRailwayMap) | Rail, metro and tram lines on top of any base map, including satellite. |
 
 Your choices are remembered in this browser.
+
+**Rough fixes and outliers.** A fix worse than 50 m (usually a Wi-Fi or cell-tower guess rather
+than GPS) is *rough*. Rough fixes still place people on the map, but the track line only joins good
+fixes: each rough one shows as a small ring of its own, so a scatter of guesses doesn't turn into
+spaghetti, and they don't count towards speeds. A rough fix that is also a jump (more than 300 m
+from the fixes either side of it, while those two agree, all within 15 minutes) is left out
+altogether. It still shows as a dashed grey ring in the **Every fix as a dot** layer, and nothing is
+deleted. Alerts are careful too: a rough fix alone never sends an "arrived" or "left" email (see
+`rough_accuracy_m` in [Configuration](configuration.md)).
 
 ![The heatmap layer over 30 days: the hot spots are home, the park and the routes between](images/heatmap.png)
 

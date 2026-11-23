@@ -18,12 +18,20 @@ const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 // Served at "/" directly or at "/family/" behind the radio-gateway proxy: resolve API paths against
 // wherever this page lives.
 const BASE = location.pathname.replace(/[^/]*$/, "");
+/* Every request has a time limit (opts.timeout, ms). Without one, a request caught by the PC sleeping
+   or the network dropping can hang for good, and the live refresh, which waits for the previous one,
+   never runs again: the page sits on hours-old positions until a manual reload. */
 async function api(path, opts = {}) {
-  const o = { headers: {}, ...opts };
+  const { timeout = 30000, ...rest } = opts;
+  const o = { headers: {}, ...rest };
   if (o.method && !["GET", "POST"].includes(o.method)) { o.headers["X-HTTP-Method-Override"] = o.method; o.method = "POST"; }
   path = BASE + path.replace(/^\//, "");
   if (o.body && typeof o.body !== "string") { o.body = JSON.stringify(o.body); o.headers["Content-Type"] = "application/json"; }
-  const r = await fetch(path, o);
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeout);
+  let r;
+  try { r = await fetch(path, { ...o, signal: ctl.signal }); }
+  catch (e) { throw e.name === "AbortError" ? new Error("The server didn't answer in time.") : e; }
+  finally { clearTimeout(timer); }
   if (r.status === 401 && !path.includes("api/auth/")) { showAuth(); throw new Error("Signed out. Sign in again."); }
   const ct = r.headers.get("content-type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
@@ -141,6 +149,8 @@ const map = L.map("map", { zoomControl: false, maxZoom: 22, preferCanvas: true, 
 L.control.zoom({ position: "topright" }).addTo(map);
 L.control.scale({ position: "bottomright", imperial: true }).addTo(map);
 const canvasR = L.canvas({ padding: 0.3 });
+map.createPane("dotsPane").style.zIndex = 420;   // fix dots above the tracks (overlayPane 400)
+const dotsR = L.canvas({ padding: 0.3, pane: "dotsPane" });
 new ResizeObserver(() => map.invalidateSize({ pan: false })).observe($("#map"));
 const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const esriAttr = "Tiles &copy; Esri, Maxar, Earthstar Geographics, USDA, USGS, AeroGRID, IGN, GIS User Community";
@@ -287,6 +297,33 @@ const lastOf = (d) => (d.last ? [d.last.ts, d.last.lat, d.last.lon, d.last.acc, 
 /* Times each device clearly moved (consecutive own fixes > 250 m apart, beyond their accuracy),
    rebuilt when data loads. Used to tell which device is with the person when they disagree. */
 let MOVES = {};
+/* Outliers: a fix is left out (soft: only in this page, nothing is deleted) when it is BOTH rough
+   (worse than SPIKE_ACC) AND an out-and-back jump: more than SPIKE_MIN_M from the last kept fix and
+   from the next good fix, while those two agree with each other, all within 15 minutes. Measured on a
+   week of real fixes: catches the 400-2,400 m cell-tower jumps but keeps the 30-65 m Wi-Fi/cell
+   fixes that make up ~40% of a drive. The newest fix is never judged (nothing after it yet).
+   Left-out fixes are kept in S.spikes for the "Every fix as a dot" layer. */
+const SPIKE_ACC = 50, SPIKE_MIN_M = 300, SPIKE_WINDOW = 15 * 60;   // real jumps measured: all back within 4 min
+function dropSpikes() {
+  S.spikes = {};
+  for (const [id, a] of Object.entries(S.data)) {
+    if (a.length < 3) continue;
+    const kept = [], out = [];
+    for (let i = 0; i < a.length; i++) {
+      const p = a[i], prev = kept[kept.length - 1];
+      if (prev && (p[3] || 0) > SPIKE_ACC) {
+        let next = null;
+        for (let j = i + 1; j < a.length && a[j][0] - prev[0] <= SPIKE_WINDOW; j++) if ((a[j][3] || 0) <= SPIKE_ACC) { next = a[j]; break; }
+        if (next) {
+          const d1 = haversine(prev[1], prev[2], p[1], p[2]), d2 = haversine(p[1], p[2], next[1], next[2]);
+          if (Math.min(d1, d2) > SPIKE_MIN_M && haversine(prev[1], prev[2], next[1], next[2]) < 0.3 * Math.min(d1, d2)) { out.push(p); continue; }
+        }
+      }
+      kept.push(p);
+    }
+    if (out.length) { S.data[id] = kept; S.spikes[id] = out; }
+  }
+}
 function buildMoves() {
   MOVES = {};
   for (const [id, a] of Object.entries(S.data)) {
@@ -344,8 +381,10 @@ function fenceAt(lat, lon) {
    they span 3 min, so 30-s follow fixes aren't all noise). Only from ONE device (mixing devices
    fakes jumps), only if the newest fix is recent, no gap > 35 min, and the net move clears
    250 m / the fixes' accuracy, so GPS jitter at rest never shows as a speed. Fixes worse than
-   200 m (Apple's cell/Wi-Fi guesses) are skipped. */
-const SPEED_MAX_ACC = 200, SPEED_MIN_FIXES = 3, SPEED_MAX_FIXES = 6, SPEED_MIN_SPAN = 3 * 60, SPEED_FRESH = 15 * 60;
+   ROUGH_ACC (50 m: Apple's cell/Wi-Fi guesses) are skipped for speed and the track line; they
+   still place people. */
+const ROUGH_ACC = 50;   // same as the server's rough_accuracy_m default
+const SPEED_MAX_ACC = ROUGH_ACC, SPEED_MIN_FIXES = 3, SPEED_MAX_FIXES = 6, SPEED_MIN_SPAN = 3 * 60, SPEED_FRESH = 15 * 60;
 function avgSpeed(pos, t = S.t) {
   if (!pos) return null;
   const a = S.data[pos.dev.id] || [];
@@ -441,8 +480,12 @@ scrub.addEventListener("input", () => {
 function updateBanner() {
   const b = $("#viewBanner");
   if (S.follow && !S.playing) {
-    b.className = "view-banner live";
-    b.innerHTML = `<span class="dot"></span><span>Live, updated ${S.lastRefresh ? ago(S.lastRefresh) : "now"}</span>`;
+    // stale = the page itself hasn't managed to refresh (asleep, offline, server down): say so
+    const stale = S.lastRefresh && now() - S.lastRefresh > 120;
+    b.className = "view-banner live" + (stale ? " stale" : "");
+    b.innerHTML = stale
+      ? `<span class="dot"></span><span>Last updated ${esc(ago(S.lastRefresh))}, reconnecting…</span>`
+      : `<span class="dot"></span><span>Live, updated ${S.lastRefresh ? ago(S.lastRefresh) : "now"}</span>`;
   } else {
     b.className = "view-banner";
     b.innerHTML = `<span class="dot" style="background:var(--contour)"></span><span>Viewing ${esc(dt(S.t))}</span><button class="btn small primary" id="backNow">Back to now</button>`;
@@ -484,8 +527,8 @@ async function loadDevices() {
 async function loadFences() { S.fences = await api("/api/geofences"); renderPlaces(); }
 async function loadPoints() {
   $("#tFrom").value = toLocalInput(S.start); $("#tTo").value = toLocalInput(S.end);
-  const res = await api(`/api/points?start=${S.start}&end=${S.end}`);
-  S.data = res.points;
+  const res = await api(`/api/points?start=${S.start}&end=${S.end}`, { timeout: 120000 });   // 1y / All can be big
+  S.data = res.points; dropSpikes();
   buildMoves();
   if (res.truncated) toast("This range has more than 200,000 fixes, so only the first 200,000 are shown. Choose a shorter range.", 6000);
   computeRuns(); drawLanes(); buildPhotos(); render(true);
@@ -654,7 +697,7 @@ function segSpeedBin(p0, p1) {
 let speedLegend = null;
 function showSpeedLegend(on) {
   if (!on) { if (speedLegend) { speedLegend.remove(); speedLegend = null; } return; }
-  const html = `<span class="sl-h">mph</span>${SPEED_BINS.map(([, lab], i) => `<span class="sl-i"${i ? "" : ' title="Walking"'}><i style="background:${SPEED_COLORS[i]}"></i>${lab}</span>`).join("")}<span class="sl-i sl-unsure" title="More than 15 min between fixes, or a fix less accurate than 200 m"><i class="unsure"></i>no speed</span>`;
+  const html = `<span class="sl-h">mph</span>${SPEED_BINS.map(([, lab], i) => `<span class="sl-i"${i ? "" : ' title="Walking"'}><i style="background:${SPEED_COLORS[i]}"></i>${lab}</span>`).join("")}<span class="sl-i sl-unsure" title="More than 15 min between fixes"><i class="unsure"></i>no speed</span>`;
   if (!speedLegend) {
     speedLegend = L.control({ position: "bottomleft" });
     speedLegend.onAdd = () => { const el = L.DomUtil.create("div", "speed-legend"); el.setAttribute("aria-label", "Track colour = speed"); return el; };
@@ -723,33 +766,44 @@ function render(full = false) {
   L_tracks.clearLayers(); L_people.clearLayers(); L_acc.clearLayers(); L_points.clearLayers(); L_devices.clearLayers();
   const heat = [], wantDots = map.hasLayer(L_points), wantHeat = map.hasLayer(L_heat), wantDevs = map.hasLayer(L_devices);
 
+  /* The line joins only good fixes. A rough one (worse than ROUGH_ACC: Wi-Fi/cell-tower guesses) is
+     shown as a small ring on its own instead of being joined in, so a scatter of rough fixes reads
+     as points rather than spaghetti. Click either for the fix and its accuracy circle. */
   const drawTrack = (d, color, opts = {}) => {
     const a = S.data[d.id]; if (!a || !a.length) return;
     const i1 = idxAt(a, S.t); if (i1 < 0) return;
     const i0 = idxAt(a, from - 1e-6) + 1;
-    let seg = [];
-    const plain = !(speedOn && !opts.dash);
-    const flush = () => { if (seg.length > 1 && plain) L.polyline(seg, { color, weight: opts.weight || 3.5, opacity: opts.opacity || 0.85, dashArray: opts.dash, renderer: canvasR, lineJoin: "round" }).addTo(L_tracks); seg = []; };
+    const pick = (e) => { L.DomEvent.stop(e); selectNearestFix(d, a, i0, i1, e.latlng); };
+    const good = [];
     for (let i = i0; i <= i1; i++) {
       const p = a[i];
-      if (seg.length && p[0] - a[i - 1][0] > GAP_BREAK) flush();
-      seg.push([p[1], p[2]]);
       if (wantHeat) heat.push([p[1], p[2], 0.5]);
-      if (wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1, fillOpacity: 0.7, renderer: canvasR }).bindPopup(() => fixPopup(d, p)).addTo(L_points);
+      if (wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1, fillOpacity: 0.7, renderer: dotsR }).on("click", (e) => { L.DomEvent.stop(e); selectFix(d, p); }).addTo(L_points);
+      if ((p[3] || 0) > ROUGH_ACC) {
+        if (!wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1.5, opacity: 0.8 * (opts.opacity || 1), fill: false, renderer: dotsR })
+          .bindTooltip(`Rough fix, within ${Math.round(p[3])} m`).on("click", (e) => { L.DomEvent.stop(e); selectFix(d, p); }).addTo(L_tracks);
+      } else good.push(p);
+    }
+    if (wantDots) for (const p of S.spikes?.[d.id] || []) if (p[0] >= from && p[0] <= S.t)
+      L.circleMarker([p[1], p[2]], { radius: 5, color: "#b0b0aa", weight: 1.5, fill: false, dashArray: "2 2", renderer: dotsR }).on("click", (e) => { L.DomEvent.stop(e); selectFix(d, p, true); }).addTo(L_points);
+    if (speedOn && !opts.dash) return drawSpeedRuns(good, pick);
+    let seg = [];
+    const flush = () => { if (seg.length > 1) L.polyline(seg, { color, weight: opts.weight || 3.5, opacity: opts.opacity || 0.85, dashArray: opts.dash, renderer: canvasR, lineJoin: "round" }).on("click", pick).addTo(L_tracks); seg = []; };
+    for (let i = 0; i < good.length; i++) {
+      if (i && good[i][0] - good[i - 1][0] > GAP_BREAK) flush();
+      seg.push([good[i][1], good[i][2]]);
     }
     flush();
-    if (speedOn && !opts.dash) drawSpeedRuns(a, i0, i1);
   };
   const speedOn = map.hasLayer(L_speed) && map.hasLayer(L_tracks);
   showSpeedLegend(speedOn);
   // speed mode: a surface-coloured casing, then runs of same-speed-band segments on top
-  const drawSpeedRuns = (a, i0, i1) => {
+  const drawSpeedRuns = (g, pick) => {
     const casing = darkTiles() ? "rgba(255,255,255,.55)" : "rgba(25,25,24,.55)";
     const runs = []; let cur = null, chunk = [];
     const casings = [];
-    for (let i = Math.max(i0, 1); i <= i1; i++) {
-      const p0 = a[i - 1], p1 = a[i];
-      if (i - 1 < i0) continue;
+    for (let i = 1; i < g.length; i++) {
+      const p0 = g[i - 1], p1 = g[i];
       if (p1[0] - p0[0] > GAP_BREAK) { if (chunk.length > 1) casings.push(chunk); chunk = []; cur = null; continue; }
       if (!chunk.length) chunk.push([p0[1], p0[2]]);
       chunk.push([p1[1], p1[2]]);
@@ -762,7 +816,7 @@ function render(full = false) {
     for (const r of runs) {
       const unsure = r.b < 0;
       L.polyline(r.pts, { color: unsure ? SPEED_UNSURE : SPEED_COLORS[r.b], weight: 3.5, opacity: 1, dashArray: unsure ? "4 5" : null, renderer: canvasR, lineJoin: "round", lineCap: "round" })
-        .bindTooltip(unsure ? "No speed: a gap between fixes or a rough fix" : r.b === 0 ? "Walking (under 4 mph)" : `${SPEED_BINS[r.b][1]} mph`, { sticky: true }).addTo(L_tracks);
+        .bindTooltip(unsure ? "No speed: more than 15 min between fixes" : r.b === 0 ? "Walking (under 4 mph)" : `${SPEED_BINS[r.b][1]} mph`, { sticky: true }).on("click", pick).addTo(L_tracks);
     }
   };
 
@@ -863,6 +917,31 @@ function fixPopup(d, p, current = false) {
     <a data-a="place">Make this a place</a></div>`, {
     locate: () => locateOne(d), here: () => whatsHere(lat, lon), place: () => newPlace(lat, lon),
   });
+}
+/* Clicking a track or a fix dot selects one saved fix: its details pop up and its accuracy circle is
+   drawn, so a fix that's far off the route but has a huge circle reads as an outlier, not a detour.
+   L_sel is never cleared by render(), so the selection survives live refreshes; closing the popup
+   clears it. */
+map.createPane("selPane").style.zIndex = 450;   // above tracks (overlayPane 400), below markers (600)
+const selR = L.svg({ pane: "selPane" });
+const L_sel = L.layerGroup().addTo(map);
+function selectFix(d, p, outlier = false) {
+  const [, lat, lon, acc] = p, ll = [lat, lon];
+  L_sel.clearLayers();
+  if (acc) L.circle(ll, { radius: acc, color: "#e8a33d", weight: 2, dashArray: "5 4", fillColor: "#e8a33d", fillOpacity: 0.15, interactive: false, pane: "selPane", renderer: selR }).addTo(L_sel);
+  L.circleMarker(ll, { radius: 5, color: "#e8a33d", weight: 2.5, fillColor: "#fff", fillOpacity: 1, interactive: false, pane: "selPane", renderer: selR }).addTo(L_sel);
+  const el = fixPopup(d, p);
+  if (outlier) el.insertAdjacentHTML("afterbegin", '<p class="muted small" style="margin:0 0 6px">Left out of the track and position: a rough fix far from the fixes either side of it.</p>');
+  const pop = L.popup({ autoPan: false, offset: [0, -4] }).setLatLng(ll).setContent(el);
+  pop.on("remove", () => { if (L_sel._pop === pop) { L_sel.clearLayers(); L_sel._pop = null; } });
+  L_sel._pop = pop; pop.openOn(map);
+}
+function selectNearestFix(d, a, i0, i1, latlng) {
+  // nearest saved fix on screen to where the track was clicked
+  const c = map.latLngToContainerPoint(latlng);
+  let best = -1, bd = Infinity;
+  for (let i = i0; i <= i1; i++) { const q = map.latLngToContainerPoint([a[i][1], a[i][2]]), dd = q.distanceTo(c); if (dd < bd) { bd = dd; best = i; } }
+  if (best >= 0) selectFix(d, a[best]);
 }
 function buildPhotos() {
   L_photos.clearLayers();
@@ -1052,7 +1131,7 @@ function showLastKnown(d) {
 async function locateOne(d) {
   toast(`Locating ${d.name}. This can take up to 40 seconds.`, 40000);
   try {
-    const r = await api(`/api/icloud/locate/${encodeURIComponent(d.id)}`, { method: "POST" });
+    const r = await api(`/api/icloud/locate/${encodeURIComponent(d.id)}`, { method: "POST", timeout: 90000 });
     await refreshAll();
     const n = S.byId[d.id];
     if (r.updated && n && n.last) { fly([n.last.lat, n.last.lon], Math.max(map.getZoom(), 16)); toast(`Located ${d.name}.`, 5000); }
@@ -1384,10 +1463,10 @@ async function loadStatus() {
   return st;
 }
 const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch (e) { toast(e.message, 6000); } finally { if (btn) btn.disabled = false; loadStatus().catch(() => {}); } };
-$("#icLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/login", { method: "POST", body: { apple_id: $("#icId").value, password: $("#icPw").value, remember: $("#icRemember").checked } }); $("#icPw").value = ""; icRememberOpen = false; toast(r.detail || stateWord(r.state)); }); });
-$("#ic2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/2fa", { method: "POST", body: { code: $("#icCode").value } }); $("#icCode").value = ""; toast(r.state === "ok" ? "Connected to iCloud." : r.detail); if (r.state === "ok") setTimeout(refreshAll, 4000); }); });
+$("#icLogin").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/login", { method: "POST", timeout: 90000, body: { apple_id: $("#icId").value, password: $("#icPw").value, remember: $("#icRemember").checked } }); $("#icPw").value = ""; icRememberOpen = false; toast(r.detail || stateWord(r.state)); }); });
+$("#ic2fa").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await api("/api/icloud/2fa", { method: "POST", timeout: 90000, body: { code: $("#icCode").value } }); $("#icCode").value = ""; toast(r.state === "ok" ? "Connected to iCloud." : r.detail); if (r.state === "ok") setTimeout(refreshAll, 4000); }); });
 $("#icSms").onclick = (e) => busy(e.target, async () => toast((await api("/api/icloud/sms", { method: "POST" })).detail));
-$("#icPoll").onclick = (e) => busy(e.target, async () => { toast("Locating everyone. This takes about 20 seconds.", 25000); await api("/api/icloud/poll?locate=true", { method: "POST" }); await refreshAll(); toast("Located everyone who answered."); });
+$("#icPoll").onclick = (e) => busy(e.target, async () => { toast("Locating everyone. This takes about 20 seconds.", 25000); await api("/api/icloud/poll?locate=true", { method: "POST", timeout: 90000 }); await refreshAll(); toast("Located everyone who answered."); });
 
 $("#icRememberBtn").onclick = () => { icRememberOpen = true; $("#icLogin").classList.remove("hidden"); $("#icRememberBtn").classList.add("hidden"); $("#icRemember").checked = true; if (!$("#icId").value) $("#icId").value = icAppleId; $("#icPw").focus(); };
 $("#icForget").onclick = (e) => { if (confirm("Delete the saved Apple ID password? Tracking carries on, but the next time Apple ends the session you'll have to sign in again.")) busy(e.target, async () => { await api("/api/icloud/forget-password", { method: "POST" }); toast("Saved password deleted."); refreshAll(); }); };
@@ -1406,8 +1485,8 @@ $("#pwChange").addEventListener("submit", (e) => { e.preventDefault(); busy(e.su
 async function refreshAll() {
   await Promise.all([loadDevices(), loadFences()]);
   if (S.preset === "live" && S.follow && !S.playing) { [S.start, S.end] = presetRange("live"); S.t = S.end; }
-  S.lastRefresh = now();
   await loadPoints();
+  S.lastRefresh = now();   // only once it all worked, so the banner can tell a failing refresh
 }
 /* playback speed and trail: continuous sliders on a log scale (0-1000).
    Speed 1 s/s (real time) .. 1 h/s; trail 15 min .. 7 days, with the far right end (>= 970) = whole track. */
@@ -1468,20 +1547,47 @@ async function start() {
   await setPreset(S.preset === "custom" ? "live" : S.preset);
   handleHash(true);
   addEventListener("hashchange", () => handleHash());
-  // Live data: refresh every 30 s while visible, and straight away when the page comes back into view
-  // (phones keep a backgrounded tab's old data until then).
-  let refreshing = false;
-  const liveRefresh = async () => {
-    if (document.hidden || refreshing) return;
-    refreshing = true;
-    try { await refreshAll(); } catch { /* next tick retries */ } finally { refreshing = false; }
+  // Live data: refresh every 30 s, and straight away when the page comes back into view or the network
+  // returns (phones suspend a backgrounded tab entirely, so it has old data until then).
+  // `refreshing` stops overlapping refreshes; it's a start time, so a refresh that somehow never
+  // settles can't block the ones after it for more than 2 minutes (api() times out at 30 s anyway).
+  let refreshing = 0;
+  /* Diagnostics: whenever the data was more than 3 minutes old by the time a refresh succeeded, or 3
+     refreshes in a row failed, the page reports what happened in between to the server log
+     (journal "[ClientError] ... refresh:"). A failed refresh is otherwise silent by design. */
+  const R = { busy: 0, fails: 0, lastErr: "", reasons: {} };
+  const PAGE_VER = (document.querySelector('script[src*="app.js"]')?.src.match(/v=(\d+)/) || [])[1] || "?";
+  const report = (what) => {
+    const msg = `refresh: ${what} | page v${PAGE_VER} | preset ${S.preset}, follow ${S.follow}, playing ${S.playing}, visible ${!document.hidden}, `
+      + `skipped busy ${R.busy}, failed ${R.fails}${R.lastErr ? ` (last: ${R.lastErr})` : ""}, triggers ${JSON.stringify(R.reasons)}`;
+    try { navigator.sendBeacon(BASE + "api/client-error", new Blob([JSON.stringify({ msg, url: location.href, ua: navigator.userAgent })], { type: "application/json" })); } catch { /* best effort */ }
   };
-  setInterval(liveRefresh, 30000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { liveRefresh(); loadStatus().catch(() => {}); } });
-  addEventListener("focus", () => liveRefresh());
-  addEventListener("pageshow", (e) => { if (e.persisted) liveRefresh(); });   // back/forward cache on iOS
-  setInterval(() => { if (!document.hidden) loadStatus().catch(() => {}); }, 20000);
-  setInterval(() => { if (!document.hidden) updateBanner(); }, 15000);
+  // Refreshes run whether or not the window is focused or even visible: on two monitors the browser
+  // can be on show without being the active window, and browsers can't always tell. (Background
+  // tabs get their timers slowed by the browser anyway, to about once a minute.)
+  const liveRefresh = async (why = "tick") => {
+    R.reasons[why] = (R.reasons[why] || 0) + 1;
+    if (refreshing && now() - refreshing < 120) { R.busy++; return; }
+    const mine = refreshing = now(), prev = S.lastRefresh;
+    try {
+      await refreshAll();
+      const gap = now() - prev;
+      if (prev && gap > 180) report(`data was ${Math.round(gap / 60)} min old, refreshed by "${why}"`);
+      Object.assign(R, { busy: 0, fails: 0, lastErr: "", reasons: {} });
+    } catch (e) {
+      R.fails++; R.lastErr = String(e && e.message || e).slice(0, 200);
+      if (R.fails === 3) report("3 refreshes in a row failed");
+    } finally { if (refreshing === mine) refreshing = 0; }
+    updateBanner();
+  };
+  // Judge by the wall clock, not by counting ticks: timers are throttled or paused while the PC sleeps
+  // or the tab is in the background, so after a wake the first tick refreshes straight away.
+  setInterval(() => { if (now() - S.lastRefresh >= 30) liveRefresh("tick"); else updateBanner(); }, 10000);
+  addEventListener("online", () => liveRefresh("online"));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { liveRefresh("visible"); loadStatus().catch(() => {}); } });
+  addEventListener("focus", () => liveRefresh("focus"));
+  addEventListener("pageshow", (e) => { if (e.persisted) liveRefresh("pageshow"); });   // back/forward cache on iOS
+  setInterval(() => loadStatus().catch(() => {}), 20000);
 }
 
 (async () => {

@@ -429,7 +429,7 @@ class ICloudSource:
         movers = [o for o in family if self.tracker.following(o, now) == "moving"]
         mode = "schedule"
         if movers:
-            mins = min(mins, max(2.0, float(self.cfg.session_renew_moving_minutes)))
+            mins = min(mins, max(1.0, float(self.cfg.session_renew_moving_minutes)))
             mode = "moving: " + ", ".join(movers)
         elif family and all(self._at_rest_for(o, now, self.cfg.quiet_after_minutes) for o in family):
             mins = max(mins, float(self.cfg.session_renew_quiet_minutes))
@@ -456,7 +456,11 @@ class ICloudSource:
                     "ORDER BY p.ts", (owner, now - minutes * 60 - 300))
         if len(rows) < 3 or rows[-1]["ts"] - rows[0]["ts"] < minutes * 60 * 0.8:
             return False
-        from .tracking import _dist_m
+        from .tracking import _dist_m, trusted
+        rows = [dict(ts=r[0], lat=r[1], lon=r[2], acc=r[3])
+                for r in trusted([(r["ts"], r["lat"], r["lon"], r["acc"]) for r in rows], self.cfg.rough_accuracy_m)]
+        if len(rows) < 3:
+            return False
         la, lo = rows[-1]["lat"], rows[-1]["lon"]
         lim = max(self.cfg.stay_radius_m, 150.0)
         return all(_dist_m(r["lat"], r["lon"], la, lo) <= lim + (r["acc"] or 0) for r in rows)

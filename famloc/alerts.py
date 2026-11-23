@@ -76,9 +76,14 @@ def links(cfg: Config, fragment: str = "") -> str:
     return "\n".join(out)
 
 
+CONFIRM_ROUGH_S = 10 * 60   # rough fixes alone confirm a change after agreeing this long
+CONFIRM_MAX_S = 30 * 60     # an unconfirmed change is forgotten after this
+
+
 class Alerter:
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self._pending: dict[tuple, tuple[str, float]] = {}   # (fence, device) -> (kind, first ts)
 
     # ---------- email ----------
     def email_configured(self) -> bool:
@@ -165,6 +170,31 @@ class Alerter:
             focus = "focus=" + quote(dev.get("owner") or dev["id"])
             when = time.strftime("%H:%M %a %d %b", time.localtime(ts))
             maps = f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lon:.6f}#map=16/{lat:.5f}/{lon:.5f}"
+            # A rough fix (cell-tower guesses can land a km away, then snap back) can't flip the state
+            # on its own. It waits for a good fix that agrees, or rough fixes that keep agreeing for
+            # CONFIRM_ROUGH_S; a fix that contradicts it, or CONFIRM_MAX_S passing, drops it. The
+            # alert then carries the time the change was first seen.
+            kind = "enter" if inside_now and not st["inside"] else "exit" if outside_now and st["inside"] else None
+            key = (g["id"], dev["id"])
+            pend = self._pending.get(key)
+            if pend and ((pend[0] == "exit" and inside_now) or (pend[0] == "enter" and outside_now)
+                         or ts - pend[1] > CONFIRM_MAX_S):
+                log.info("dropped unconfirmed %s %s for %s (rough fix %.0f s earlier)", pend[0], g["name"], dev["name"], ts - pend[1])
+                self._pending.pop(key, None)
+                pend = None
+            if kind is None:
+                continue
+            if acc > self.cfg.rough_accuracy_m:
+                if not pend or pend[0] != kind:
+                    self._pending[key] = (kind, ts)
+                    log.info("rough fix (%.0f m) suggests %s %s for %s: waiting for confirmation", acc, kind, g["name"], dev["name"])
+                    continue
+                if ts - pend[1] < CONFIRM_ROUGH_S:
+                    continue
+            if pend and pend[0] == kind:
+                ts = pend[1]
+                when = time.strftime("%H:%M %a %d %b", time.localtime(ts))
+            self._pending.pop(key, None)
             if inside_now and not st["inside"]:
                 db.x("UPDATE fence_state SET inside=1, since=? WHERE geofence_id=? AND device_id=?",
                      (ts, g["id"], dev["id"]))

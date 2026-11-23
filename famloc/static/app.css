@@ -206,6 +206,8 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .view-banner.live { padding: 4px 14px; }
 .view-banner .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--water); }
 .view-banner.live .dot { animation: pulse 2.4s ease-out infinite; }
+.view-banner.live.stale .dot { background: var(--amber); }
+.view-banner.live.stale { color: var(--amber); }
 .view-banner .btn { border-radius: 99px; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--water) 60%, transparent); } 80%, 100% { box-shadow: 0 0 0 8px transparent; } }
 .menu { position: fixed; z-index: 1400; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; box-shadow: var(--lift); min-width: 200px; padding: 4px 0; }

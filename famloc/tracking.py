@@ -32,6 +32,31 @@ def _dist_m(a1, o1, a2, o2) -> float:
     return 2 * r * math.asin(math.sqrt(h))
 
 
+SPIKE_MIN_M, SPIKE_WINDOW_S, ROUGH_CONFIRM_S = 300.0, 15 * 60, 10 * 60
+
+
+def trusted(pts: list, rough_m: float) -> list:
+    """The fixes movement logic should believe. pts: oldest-first (ts, lat, lon, acc). A rough fix
+    (worse than rough_m; Apple's cell-tower guesses can land a km away and snap back) is dropped
+    when it is an out-and-back jump (far from the fixes either side, which agree, within 15 min),
+    and while nothing confirms it yet: no good fix after it and less than 10 min of later fixes.
+    The same jump rule as the map page (static/app.js dropSpikes)."""
+    out = []
+    for i, p in enumerate(pts):
+        if (p[3] or 0) > rough_m:
+            nxt = next((q for q in pts[i + 1:] if (q[3] or 0) <= rough_m and q[0] - p[0] <= SPIKE_WINDOW_S), None)
+            if nxt is None:
+                if pts[-1][0] - p[0] < ROUGH_CONFIRM_S:
+                    continue                                   # unconfirmed so far
+            elif out and nxt[0] - out[-1][0] <= SPIKE_WINDOW_S:
+                prev = out[-1]
+                d1, d2 = _dist_m(prev[1], prev[2], p[1], p[2]), _dist_m(p[1], p[2], nxt[1], nxt[2])
+                if min(d1, d2) > SPIKE_MIN_M and _dist_m(prev[1], prev[2], nxt[1], nxt[2]) < 0.3 * min(d1, d2):
+                    continue                                   # out-and-back jump
+        out.append(p)
+    return out
+
+
 class Tracker:
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -330,6 +355,7 @@ class Tracker:
             items = [(None, q) for q in seqs if q]
         if not self.follow_enabled(owner):
             return False
+        items = [(k, t) for k, t in ((k, trusted(q, self.cfg.rough_accuracy_m)) for k, q in items) if t]
         window = self.cfg.follow_rest_minutes * 60
         with self.lock:
             following = self.follow_until.get(owner, 0) > now

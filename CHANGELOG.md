@@ -2,6 +2,43 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [Unreleased]
+
+- **Fix: a page left open went stale until reloaded.** After a long time away (PC asleep, network
+  dropped), the map could keep showing hours-old positions: one request had hung, and the live
+  refresh waits for the previous one, so it never ran again. Every request now has a time limit
+  (30 s; longer for locating, signing in and big ranges), a stuck refresh can't block the next for
+  more than 2 minutes, and the refresh goes by the clock, so the first check after waking up
+  refreshes straight away. It also refreshes when the network comes back.
+- **The page refreshes even when its window isn't the active one** (or the browser thinks it's
+  hidden), so a map on a second monitor stays current. Every refresh that comes back to data more
+  than 3 minutes old, or 3 failures in a row, is reported to the server log (`refresh:` lines), so
+  a stale page can be diagnosed.
+- **Click a track to check a fix.** Clicking anywhere on a track (or a fix dot) picks the nearest saved
+  fix, shows its details and draws its accuracy circle, so a point far off the route with a huge
+  circle reads as an outlier rather than a detour. Closing the popup clears it.
+- **Outliers left out of the map.** A fix that is both rough (worse than 50 m) and an out-and-back
+  jump (more than 300 m from the fixes either side, which agree, within 15 minutes) is left out of
+  tracks, positions and speeds, in the page only; nothing is deleted. On a week of real data it
+  removed 18 of 6,800 fixes, all 300 m to 5.6 km cell-tower jumps lasting 4 minutes or less.
+  Left-out fixes show as dashed grey rings in the fix-dot layer; clicking one says why.
+- **Rough fixes aren't joined into the track.** The line joins only fixes better than 50 m; each rough
+  one (Wi-Fi/cell-tower guess) shows as a small ring of its own, so a scatter of guesses no longer
+  draws spaghetti. Speeds ignore rough fixes too (was: worse than 200 m).
+- **Fix: false "left" emails from a single rough fix.** On 2026-11-23 a 427 m cell guess ~1 km away,
+  between 9 m GPS fixes at the place, emailed "Sam left School" and started following them.
+  A fix worse than `rough_accuracy_m` (new, default 50 m) now can't trigger an arrival or departure
+  by itself: it needs a good fix that agrees, or rough fixes that keep agreeing for 10 minutes; a
+  contradicting fix cancels it, and the alert carries the time it was first seen. Movement
+  detection (follow while moving, quiet mode) ignores rough out-and-back jumps and an unconfirmed
+  rough newest fix.
+- **Fix: the fix-dot layer was hidden under the speed-coloured tracks.** Dots now draw above them.
+- **Faster family sessions allowed:** `session_renew_moving_minutes` can now go down to 1 minute (the
+  floor was 2). The default stays at 2.
+- **The Live banner says when the page itself is out of date.** If it hasn't managed to refresh for
+  2 minutes it turns amber and reads "Last updated 2.7 h ago, reconnecting…" instead of the old
+  "Live, updated…".
+
 ## [1.11.2] -- 2026-11-23
 
 Docs for parents of a new driver.
