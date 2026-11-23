@@ -2,7 +2,9 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
-## [Unreleased]
+## [1.11.2] -- 2026-11-23
+
+Docs for parents of a new driver.
 
 - **Docs: keeping an eye on a new driver.** A README section and a user-guide how-to for parents of
   a teen who has started driving: arrival emails, speed-coloured trips, follow while moving,
