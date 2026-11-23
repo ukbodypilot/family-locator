@@ -2,7 +2,9 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
-## [Unreleased]
+## [1.11.1] -- 2026-11-23
+
+New dark-mode screenshots.
 
 - **New screenshots, in dark mode,** showing speed-coloured tracks, playback following someone at
   75 mph, the heatmap, places and the phone layout. The demo seeder (`tools/seed_demo.py`) adds a
