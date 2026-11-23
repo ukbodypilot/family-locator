@@ -2,6 +2,21 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.12.1] -- 2026-11-23
+
+Alerts in the right order, and a page error fixed.
+
+- **Fix: a sleeping device sent a late, out-of-order alert.** A laptop in a bag kept its last
+  position at the place you left, then reported "left" when it woke up at the next place, after
+  the phone had already said "arrived". If another of that person's devices has already reported
+  the same arrival or departure since this one last changed, the late one is logged but not
+  emailed, however late it comes. (The 15-minute window for a phone and watch crossing together
+  stays as it was.)
+- **Fix: "left" now comes before "arrived".** When one fix crosses two places, the departure is
+  checked first, so the alerts arrive in the order things happened.
+- **Fix: the people list could fail to draw** when all of a person's recent fixes were rough (the
+  speed calculation had nothing left to work with). It now just shows no speed.
+
 ## [1.12.0] -- 2026-11-23
 
 Rough fixes handled properly (no false alerts, no spaghetti), and an open page that stays fresh.
