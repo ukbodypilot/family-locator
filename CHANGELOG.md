@@ -2,6 +2,35 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [2.0.0] -- 2026-11-23
+
+User pages: a cut-down page for each family member, or for a relative, opened with a secret link.
+
+- **User pages.** A page that shows only the people you choose: the same map, speed-coloured
+  tracks, heatmap, timeline, playback, search and insights, but no tracking settings, no locate,
+  no follow, no renaming, and no view of anyone else. Each page has **its own places**, which you
+  don't see and it doesn't see yours, and **its own alerts**, emailed to an address you set for it.
+- **No password, a secret link.** The link is the key. **New link** replaces it, and the old one
+  stops working at once; **Delete page** removes it with its places and alerts. Wrong links are
+  throttled (10 different wrong links in 5 minutes locks that address out for 5 minutes; a stale tab
+  retrying one dead link never counts more than once) and logged as `[WebAccess]` lines. An old link
+  opens a page saying it doesn't work any more.
+- **A page per person, automatically.** Every family member gets their own page showing just
+  them. Delete one you don't want and it isn't made again. Make more by hand in **Setup > User
+  pages**, such as Grandma's page showing several people.
+- **Daily email for a user page (optional):** yesterday's summary (distance, trips, arrivals and
+  departures at its places) led by today's link, at the hour you pick. The user can switch it off
+  on their Alerts tab.
+- **Your daily summary lists every user page with today's link**, each on its own line. The
+  tunnel address changes when it restarts, so the current links are always in your inbox.
+- **Closed by default.** The server only lets a user page reach an allow-list of read routes, its
+  own places and its own settings, and scopes each answer to its people; everything else answers
+  403. Its emails carry only its own link, never yours.
+- **Needs the matching radio-gateway change** (user pages and the app's static files skip the
+  gateway login so the links work from an email); see [User pages](docs/user-pages.md).
+- New: `docs/user-pages.md`. The database gains a `viewers` table and `viewer_id` columns on
+  places and events, added automatically on first start.
+
 ## [1.12.2] -- 2026-11-23
 
 New speed colours, with a band for trains and planes.
