@@ -93,7 +93,7 @@ Every map zooms to level 22. Past a map's real detail, its last tiles are enlarg
 |---|---|
 | People and items | Person markers and AirTags. |
 | Tracks | Each person's path, from their main device. |
-| Tracks coloured by speed | On by default. Colours each track by how fast they were going: purple walking (under 4 mph), blue to 10, green to 25, yellow to 50, orange to 75, red above. Grey dashes where no speed can be trusted (more than 15 minutes between fixes). A legend sits bottom left; hover a stretch for its band. Click anywhere on a track to see the nearest fix and its accuracy circle. |
+| Tracks coloured by speed | On by default. Colours each track by how fast they were going: purple walking (under 5 mph), blue to 20, yellow to 55, orange to 75, red to 90, magenta above (trains, planes). Grey dashes where no speed can be trusted (more than 15 minutes between fixes). A legend sits bottom left; hover a stretch for its band. Click anywhere on a track to see the nearest fix and its accuracy circle. |
 | Accuracy circles | How precise each person's fix is. |
 | Every device separately | A small dot for every device, not just each person. |
 | Every fix as a dot | Every saved fix in the range; click one for details and its accuracy circle. Fixes left out as outliers show as dashed grey rings. |
@@ -148,8 +148,8 @@ Set-up for keeping an eye on a teen who has started driving:
    a shorter **Fresh location** (5 minutes, say) to catch the start of short trips. See
    [Tracking and following](tracking.md).
 3. **Speed colours.** Keep **Tracks coloured by speed** on (it is by default). Pick **24h** or
-   **7d** on the timeline and look for orange and red stretches: orange is 50–75 mph, red is
-   over 75. Hover a stretch to see its band.
+   **7d** on the timeline and look for orange and red stretches: orange is 55–75 mph, red
+   is 75–90, and magenta is over 90. Hover a stretch to see its band.
 4. **Replay a trip.** Drag the timeline to the start of a drive and press play. Their marker shows
    their speed as it goes, and clicking them keeps the map centred on them.
 5. **Insights.** Pick their phone for the trips list with each trip's distance and average speed.

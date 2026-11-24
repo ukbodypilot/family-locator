@@ -316,7 +316,7 @@ label.tb-slider { display: inline-flex; flex-direction: row; align-items: center
 #lockChip button:hover { background: var(--line, rgba(0,0,0,.08)); }
 
 /* track speed legend (bottom-left of the map) */
-.speed-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; max-width: min(440px, calc(100vw - 90px)); padding: 5px 10px; border-radius: 6px; background: var(--panel); color: var(--ink-2); box-shadow: 0 1px 4px rgba(0,0,0,.3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.speed-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; max-width: min(560px, calc(100vw - 90px)); padding: 5px 10px; border-radius: 6px; background: var(--panel); color: var(--ink-2); box-shadow: 0 1px 4px rgba(0,0,0,.3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .speed-legend .sl-h { color: var(--ink); font-weight: 600; }
 .speed-legend .sl-i { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .speed-legend i { display: inline-block; width: 16px; height: 4px; border-radius: 2px; }

@@ -678,13 +678,13 @@ function centreOnLane() {
 addEventListener("resize", () => drawLanes());
 
 /* ---------------- track speed colours ----------------
-   Rainbow, as chosen: purple walking, blue to 10 mph, green to 25, yellow to 50, orange to
-   75, red over. Shades tuned with the dataviz validator so NEIGHBOURING bands stay apart: on light
+   Rainbow, as chosen: purple walking (under 5 mph), blue to 20, yellow to 55, orange to 75,
+   red to 90, magenta over (trains, planes). Shades tuned with the dataviz validator so NEIGHBOURING bands stay apart: on light
    tiles (#f2efe9) every check passes (CVD worst 8.9, normal vision >= 15.8); yellow/orange are
    low-contrast on light tiles and purple/red on dark ones, which the casing (dark halo on light
    maps, light halo on dark) plus the legend and hover labels make up for. Same colours on every map. */
-const SPEED_BINS = [[4, "under 4"], [10, "4–10"], [25, "10–25"], [50, "25–50"], [75, "50–75"], [Infinity, "75+"]];   // mph
-const SPEED_COLORS = ["#7b3fd0", "#1e88e5", "#2e9e2e", "#d4b000", "#f06400", "#b71c1c"];
+const SPEED_BINS = [[5, "under 5"], [20, "5–20"], [55, "20–55"], [75, "55–75"], [90, "75–90"], [Infinity, "90+"]];   // mph
+const SPEED_COLORS = ["#7b3fd0", "#1e88e5", "#d4b000", "#f06400", "#b71c1c", "#d81b9c"];
 const SPEED_UNSURE = "#8a8a86", SPEED_SEG_GAP = 15 * 60;   // a longer hop is a straight line over a gap, not the path
 const darkTiles = () => /dark/i.test(curBase);
 function segSpeedBin(p0, p1) {
@@ -816,7 +816,7 @@ function render(full = false) {
     for (const r of runs) {
       const unsure = r.b < 0;
       L.polyline(r.pts, { color: unsure ? SPEED_UNSURE : SPEED_COLORS[r.b], weight: 3.5, opacity: 1, dashArray: unsure ? "4 5" : null, renderer: canvasR, lineJoin: "round", lineCap: "round" })
-        .bindTooltip(unsure ? "No speed: more than 15 min between fixes" : r.b === 0 ? "Walking (under 4 mph)" : `${SPEED_BINS[r.b][1]} mph`, { sticky: true }).on("click", pick).addTo(L_tracks);
+        .bindTooltip(unsure ? "No speed: more than 15 min between fixes" : r.b === 0 ? "Walking (under 5 mph)" : `${SPEED_BINS[r.b][1]} mph`, { sticky: true }).on("click", pick).addTo(L_tracks);
     }
   };
 
