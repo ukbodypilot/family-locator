@@ -43,6 +43,21 @@ async function api(path, opts = {}) {
   if (!r.ok) throw new Error((data && data.detail) || (data && data.error) || r.statusText);
   return data;
 }
+/* Copy text. navigator.clipboard only exists on https pages (and localhost); on the plain-http home
+   address it's missing, so fall back to the old select-and-copy, and failing that show the text in a
+   box to copy by hand. Never claims success it didn't have. */
+async function copyText(text, okMsg) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); toast(okMsg); return; }
+  } catch { /* fall through */ }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch { ok = false; }
+  ta.remove();
+  if (ok) toast(okMsg); else prompt("Copy this:", text);
+}
 function toast(msg, ms = 3500) {
   const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden");
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), ms);
@@ -1249,7 +1264,7 @@ map.on("contextmenu", (e) => {
   openMenu(oe.clientX, oe.clientY, [
     ["What's here?", () => whatsHere(lat, lng)],
     ["Create place here", () => newPlace(lat, lng)],
-    ["Copy coordinates", () => navigator.clipboard?.writeText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`).then(() => toast("Copied coordinates."), () => toast(`${lat.toFixed(6)}, ${lng.toFixed(6)}`))],
+    ["Copy coordinates", () => copyText(`${lat.toFixed(6)}, ${lng.toFixed(6)}`, "Copied coordinates.")],
     ["Centre the map here", () => map.panTo([lat, lng])],
   ], `${lat.toFixed(5)}, ${lng.toFixed(5)}`);
 });
@@ -1474,7 +1489,7 @@ async function loadStatus() {
   const L1 = st.links || {};
   $("#pubLink").innerHTML = L1.public ? `<a href="${esc(L1.public)}" target="_blank" rel="noopener">${esc(L1.public)}</a> <button class="name-it" id="copyPub">Copy</button>` : "The gateway's tunnel isn't running, so there's no outside link right now.";
   $("#lanLink").innerHTML = L1.lan ? `At home: <a href="${esc(L1.lan)}">${esc(L1.lan)}</a>` : "";
-  if (L1.public) $("#copyPub").onclick = () => navigator.clipboard?.writeText(L1.public).then(() => toast("Copied the link."), () => toast(L1.public, 8000));
+  if (L1.public) $("#copyPub").onclick = () => copyText(L1.public, "Copied the link.");
   return st;
 }
 const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { await fn(); } catch (e) { toast(e.message, 6000); } finally { if (btn) btn.disabled = false; loadStatus().catch(() => {}); } };
@@ -1545,7 +1560,7 @@ $("#vList").onclick = (e) => {
   const act = b.dataset.a;
   if (act === "edit") return showViewerForm(v);
   if (act === "open") return window.open(link, "_blank", "noopener");
-  if (act === "copy") return navigator.clipboard?.writeText(link).then(() => toast(v.link ? "Copied the link." : "Copied the home-Wi-Fi link (the outside link is down right now)."), () => toast(link, 10000));
+  if (act === "copy") return copyText(link, v.link ? "Copied the link." : "Copied the home-Wi-Fi link (the outside link is down right now).");
   if (act === "send") return busy(b, async () => { const r = await api(`/api/viewers/${v.id}/send-link`, { method: "POST" }); toast(`Emailed the link to ${r.to}.`); });
   if (act === "new" && confirm(`Make a new link for ${v.name}? The current link stops working straight away.`))
     return busy(b, async () => { await api(`/api/viewers/${v.id}/new-link`, { method: "POST" }); await loadViewers(); toast("New link made. Send it to them."); });
