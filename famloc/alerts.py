@@ -65,6 +65,18 @@ def public_url(cfg: Config) -> str | None:
     return url
 
 
+def viewer_link(cfg: Config, v: dict, fragment: str = "") -> str | None:
+    """A user page's link that works from anywhere, or None while the tunnel is down. User pages get
+    no home-Wi-Fi link: they are for people who aren't on it."""
+    pub = public_url(cfg)
+    return f"{pub}v/{v['token']}/" + (f"#{fragment}" if fragment else "") if pub else None
+
+
+def viewer_links(cfg: Config, v: dict, fragment: str = "") -> str:
+    link = viewer_link(cfg, v, fragment)
+    return f"Open: {link}" if link else "The link isn't available right now; tomorrow's email will have a fresh one."
+
+
 def links(cfg: Config, fragment: str = "") -> str:
     """Footer lines for emails: the anywhere link (via the gateway's tunnel) and the home-Wi-Fi link."""
     frag = f"#{fragment}" if fragment else ""
@@ -86,25 +98,40 @@ class Alerter:
         self._pending: dict[tuple, tuple[str, float]] = {}   # (fence, device) -> (kind, first ts)
 
     # ---------- email ----------
-    def email_configured(self) -> bool:
+    def smtp_ready(self) -> bool:
+        """The sending account is set up (user pages need only this; the main page also needs a recipient)."""
         c = self.cfg
-        return bool(c.email_enabled and c.email_address and c.email_app_password and c.email_recipient)
+        return bool(c.email_enabled and c.email_address and c.email_app_password)
 
-    def send_email(self, subject: str, body: str) -> str | None:
-        """Returns None on success, else the error text."""
-        if not self.email_configured():
-            return "email not configured"
+    def email_configured(self) -> bool:
+        return bool(self.smtp_ready() and self.cfg.email_recipient)
+
+    def send_email(self, subject: str, body: str, viewer: dict | None = None) -> str | None:
+        """Returns None on success, else the error text. With viewer: to that user page's address, with
+        only its own link (never the main page's links)."""
         c = self.cfg
-        if "Open (home Wi-Fi)" not in body:
-            body += "\n\n" + links(c)
+        if viewer:
+            if not self.smtp_ready():
+                return "email not configured"
+            if not viewer.get("email"):
+                return "no email address for this user page"
+            to = viewer["email"]
+            if f"v/{viewer['token']}/" not in body and "link isn't available" not in body:
+                body += "\n\n" + viewer_links(c, viewer)
+        else:
+            if not self.email_configured():
+                return "email not configured"
+            to = c.email_recipient
+            if "Open (home Wi-Fi)" not in body:
+                body += "\n\n" + links(c)
         msg = MIMEText(body + "\n\n-- Family Locator\n", "plain", "utf-8")
         msg["From"] = c.email_address
-        msg["To"] = c.email_recipient
+        msg["To"] = to
         msg["Subject"] = f"[Family Locator] {subject}"
         try:
             with _email_lock, smtplib.SMTP_SSL(c.smtp_host, c.smtp_port, timeout=20) as s:
                 s.login(c.email_address, c.email_app_password)
-                s.sendmail(c.email_address, [r.strip() for r in c.email_recipient.split(",")], msg.as_string())
+                s.sendmail(c.email_address, [r.strip() for r in to.split(",")], msg.as_string())
             COUNTERS["emails_sent"] += 1
             return None
         except Exception as e:  # noqa: BLE001 - report every failure, never crash a poller
@@ -113,17 +140,18 @@ class Alerter:
             return str(e)
 
     def notify(self, kind: str, subject: str, message: str, *, device_id=None, geofence_id=None,
-               ts=None, email=True) -> None:
-        eid = db.add_event(kind, message, device_id=device_id, geofence_id=geofence_id, ts=ts)
+               ts=None, email=True, viewer: dict | None = None) -> None:
+        eid = db.add_event(kind, message, device_id=device_id, geofence_id=geofence_id, ts=ts,
+                           viewer_id=viewer["id"] if viewer else None)
         COUNTERS["events"] += 1
-        log.info("event %s: %s", kind, message)
-        if email and kind != "auth" and self.in_quiet_hours():
+        log.info("event %s%s: %s", kind, f" (user page {viewer['name']})" if viewer else "", message.split("\n")[0])
+        if email and not viewer and kind != "auth" and self.in_quiet_hours():   # quiet hours are the main page's
             db.x("UPDATE events SET email_error='quiet hours' WHERE id=?", (eid,))
             return
-        if email and self.email_configured():
+        if email and (self.smtp_ready() and viewer.get("email") if viewer else self.email_configured()):
             # Send off-thread: SMTP must never stall a poller.
             def _send():
-                err = self.send_email(subject, message)
+                err = self.send_email(subject, message, viewer=viewer)
                 db.x("UPDATE events SET emailed=?, email_error=? WHERE id=?", (0 if err else 1, err, eid))
             threading.Thread(target=_send, daemon=True, name="email").start()
 
@@ -159,6 +187,7 @@ class Alerter:
         if acc is not None and acc > self.cfg.max_alert_accuracy_m:
             return
         acc = acc or 0.0
+        viewers: dict = {}
         # fences this device is inside first: one fix that crosses two fences says "left" before "arrived"
         for g in db.q("SELECT g.* FROM geofences g LEFT JOIN fence_state fs ON fs.geofence_id=g.id AND fs.device_id=? "
                       "ORDER BY COALESCE(fs.inside, 0) DESC, g.id", (dev["id"],)):
@@ -166,6 +195,13 @@ class Alerter:
             devs = json.loads(g["devices"]) if g["devices"] else []
             if (people or devs) and dev.get("owner") not in people and dev["id"] not in devs:
                 continue
+            v = None
+            if g.get("viewer_id"):   # a user page's place: only that page's people, and its own alerts
+                if g["viewer_id"] not in viewers:
+                    viewers[g["viewer_id"]] = db.viewer(g["viewer_id"])
+                v = viewers[g["viewer_id"]]
+                if not v or dev.get("owner") not in v["people"] or dev.get("hidden") or dev.get("source") == "photos":
+                    continue
             d = haversine_m(lat, lon, g["lat"], g["lon"])
             st = db.q1("SELECT * FROM fence_state WHERE geofence_id=? AND device_id=?", (g["id"], dev["id"]))
             if st and st["since"] and ts <= st["since"]:
@@ -181,6 +217,7 @@ class Alerter:
             via = f" ({dev['name']})" if dev.get("owner") else ""
             focus = "focus=" + quote(dev.get("owner") or dev["id"])
             when = time.strftime("%H:%M %a %d %b", time.localtime(ts))
+            foot = viewer_links(self.cfg, v, focus) if v else links(self.cfg, focus)
             maps = f"https://www.openstreetmap.org/?mlat={lat:.6f}&mlon={lon:.6f}#map=16/{lat:.5f}/{lon:.5f}"
             # A rough fix (cell-tower guesses can land a km away, then snap back) can't flip the state
             # on its own. It waits for a good fix that agrees, or rough fixes that keep agreeing for
@@ -213,16 +250,16 @@ class Alerter:
                 if g["on_enter"]:
                     dup = self._person_already_alerted(dev.get("owner"), g["id"], "enter", ts, dev["id"], st["since"])
                     self.notify("enter", f"{who} arrived at {g['name']}",
-                                f"{who} arrived at {g['name']} at {when}{via}.\n\n{links(self.cfg, focus)}\nMap: {maps}",
-                                device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup)
+                                f"{who} arrived at {g['name']} at {when}{via}.\n\n{foot}\nMap: {maps}",
+                                device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup, viewer=v)
             elif outside_now and st["inside"]:
                 db.x("UPDATE fence_state SET inside=0, since=? WHERE geofence_id=? AND device_id=?",
                      (ts, g["id"], dev["id"]))
                 if g["on_exit"]:
                     dup = self._person_already_alerted(dev.get("owner"), g["id"], "exit", ts, dev["id"], st["since"])
                     self.notify("exit", f"{who} left {g['name']}",
-                                f"{who} left {g['name']} at {when}{via} (now {d:.0f} m away).\n\n{links(self.cfg, focus)}\nMap: {maps}",
-                                device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup)
+                                f"{who} left {g['name']} at {when}{via} (now {d:.0f} m away).\n\n{foot}\nMap: {maps}",
+                                device_id=dev["id"], geofence_id=g["id"], ts=ts, email=not dup, viewer=v)
 
     def check_battery(self, dev: dict, battery: float | None) -> None:
         if battery is None or battery <= 0 or self.cfg.low_battery_pct <= 0:
@@ -280,20 +317,39 @@ def primary_device(owner: str, t0: float, t1: float) -> dict | None:
     return best
 
 
-def build_digest(cfg: Config, now: float | None = None) -> tuple[str, str]:
+def yesterday(now: float) -> tuple[float, float]:
+    """Local midnight to midnight of the day before `now` (DST-safe: built from dates, not 86400 s)."""
+    lt = time.localtime(now)
+    t1 = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    y = time.localtime(t1 - 43200)
+    return time.mktime((y.tm_year, y.tm_mon, y.tm_mday, 0, 0, 0, 0, 0, -1)), t1
+
+
+def build_digest(cfg: Config, now: float | None = None, viewer: dict | None = None) -> tuple[str, str]:
+    """The main page's summary: the last 24 h, everyone, the main page's places. With viewer: that user
+    page's summary of YESTERDAY, its people and its own places only, led by today's link."""
     from . import analysis
     now = now or time.time()
-    t0 = now - 86400
-    owners = [r["owner"] for r in db.q("SELECT DISTINCT owner FROM devices WHERE source='icloud' AND owner IS NOT NULL "
-                                       "AND hidden=0 ORDER BY owner")]
-    lines = [f"Last 24 hours, to {time.strftime('%H:%M %a %d %b', time.localtime(now))}", ""]
+    vid = viewer["id"] if viewer else None
+    if viewer:
+        t0, t1 = yesterday(now)
+        owners = [o for o in viewer["people"] if db.q1("SELECT 1 FROM devices WHERE owner=? AND source='icloud'", (o,))]
+        link = viewer_link(cfg, viewer)
+        lines = [f"Your link for today: {link}" if link else
+                 "Your link isn't available right now; tomorrow's email will have a fresh one.", "",
+                 f"Yesterday, {time.strftime('%a %d %b', time.localtime(t0))}", ""]
+    else:
+        t0, t1 = now - 86400, now
+        owners = [r["owner"] for r in db.q("SELECT DISTINCT owner FROM devices WHERE source='icloud' AND owner IS NOT NULL "
+                                           "AND hidden=0 ORDER BY owner")]
+        lines = [f"Last 24 hours, to {time.strftime('%H:%M %a %d %b', time.localtime(now))}", ""]
     for owner in owners:
-        dev = primary_device(owner, t0, now)
+        dev = primary_device(owner, t0, t1)
         if dev is None:
             continue
         ev = db.q("SELECT e.ts, e.kind, g.name FROM events e JOIN devices d ON d.id=e.device_id "
                   "JOIN geofences g ON g.id=e.geofence_id WHERE d.owner=? AND e.kind IN ('enter','exit') "
-                  "AND e.ts>=? ORDER BY e.ts", (owner, t0))
+                  "AND g.viewer_id IS ? AND e.ts>=? AND e.ts<? ORDER BY e.ts", (owner, vid, t0, t1))
         moves, last = [], None
         for e in ev:  # collapse phone+watch duplicates
             key = (e["kind"], e["name"])
@@ -302,18 +358,41 @@ def build_digest(cfg: Config, now: float | None = None) -> tuple[str, str]:
             last = (key, e["ts"])
             verb = "arrived at" if e["kind"] == "enter" else "left"
             moves.append(f"    {time.strftime('%H:%M', time.localtime(e['ts']))}  {verb} {e['name']}")
-        s = analysis.summary(dev["id"], t0, now, cfg.stay_radius_m, cfg.stay_min_minutes)
+        s = analysis.summary(dev["id"], t0, t1, cfg.stay_radius_m, cfg.stay_min_minutes)
         inside = db.q("SELECT g.name, fs.since FROM fence_state fs JOIN geofences g ON g.id=fs.geofence_id "
-                      "WHERE fs.device_id=? AND fs.inside=1", (dev["id"],))
+                      "WHERE fs.device_id=? AND fs.inside=1 AND g.viewer_id IS ?", (dev["id"], vid))
         last_seen = dev["last_seen"]
-        status = (f"at {inside[0]['name']} since {time.strftime('%H:%M', time.localtime(inside[0]['since']))}"
+        status = (f"now at {inside[0]['name']} since {time.strftime('%H:%M %a', time.localtime(inside[0]['since']))}"
                   if inside else f"last fix {time.strftime('%H:%M %a', time.localtime(last_seen))}" if last_seen
                   else "no location")
-        pub = public_url(cfg)
-        person_link = f"    {(pub or lan_url(cfg))}#focus={quote(owner)}"
-        lines.append(f"{db.person_display(owner)}: {status}. {s['km']} km, {len(s['trips'])} trips ({dev['name']})")
-        lines += moves or ["    no arrivals or departures at saved places"]
-        lines.append(person_link)
+        if viewer:
+            plink = viewer_link(cfg, viewer, f"focus={quote(owner)}")
+            person_link = f"    {plink}" if plink else None
+        else:
+            pub = public_url(cfg)
+            person_link = f"    {(pub or lan_url(cfg))}#focus={quote(owner)}"
+        if viewer:
+            lines.append(f"{db.person_display(owner)}: {s['km']} km, {len(s['trips'])} trips; {status}.")
+        else:   # the main page's summary reads as it always has
+            lines.append(f"{db.person_display(owner)}: {status.removeprefix('now ')}. {s['km']} km, "
+                         f"{len(s['trips'])} trips ({dev['name']})")
+        lines += moves or ["    no arrivals or departures at " + ("your places" if viewer else "saved places")]
+        if person_link:
+            lines.append(person_link)
         lines.append("")
+    if viewer:
+        if not owners:
+            lines.append("Nobody to show yet.")
+        return f"Yesterday: {time.strftime('%a %d %b', time.localtime(t0))}", "\n".join(lines)
+    vs = db.q("SELECT id FROM viewers ORDER BY auto_owner IS NULL, name")
+    if vs:   # the main summary lists every user page with today's link (the tunnel address changes)
+        lines.append("User pages (today's links; each page shows only the people named):")
+        lines.append("")
+        for r in vs:
+            v = db.viewer(r["id"])
+            who = ", ".join(db.person_display(o) or o for o in v["people"]) or "nobody yet"
+            lines.append(f"{v['name']}'s page" if v.get("auto_owner") else f"{v['name']} (sees {who})")
+            lines.append(f"    {viewer_link(cfg, v) or lan_url(cfg) + 'v/' + v['token'] + '/'}")
+            lines.append("")
     lines.append(links(cfg, "lanes"))
     return f"Daily summary {time.strftime('%a %d %b', time.localtime(now))}", "\n".join(lines)

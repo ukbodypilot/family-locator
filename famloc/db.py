@@ -90,6 +90,18 @@ CREATE TABLE IF NOT EXISTS locate_events (
     data    TEXT               -- json
 );
 CREATE INDEX IF NOT EXISTS locate_events_ts ON locate_events(ts);
+CREATE TABLE IF NOT EXISTS viewers (       -- v2: user pages, opened by a secret link
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL,
+    token       TEXT NOT NULL UNIQUE,      -- the link; kept (not hashed) so the daily email can resend it
+    email       TEXT,                      -- their alerts and daily summary go here
+    people      TEXT NOT NULL DEFAULT '[]',-- json list of device owners this page shows
+    digest      INTEGER NOT NULL DEFAULT 0,
+    digest_hour INTEGER NOT NULL DEFAULT 8,
+    created     REAL,
+    last_seen   REAL,
+    last_digest TEXT
+);
 CREATE TABLE IF NOT EXISTS geocode_cache (
     q       TEXT PRIMARY KEY,
     ts      REAL NOT NULL,
@@ -116,6 +128,16 @@ def init() -> None:
     cols = {r["name"] for r in q("PRAGMA table_info(geofences)")}
     if "people" not in cols:  # v0.3: alert rules can target people (device owners)
         x("ALTER TABLE geofences ADD COLUMN people TEXT")
+    if "viewer_id" not in cols:  # v2: a user page's own places (NULL = the main page's)
+        x("ALTER TABLE geofences ADD COLUMN viewer_id INTEGER")
+    if "viewer_id" not in {r["name"] for r in q("PRAGMA table_info(events)")}:
+        x("ALTER TABLE events ADD COLUMN viewer_id INTEGER")
+    if "auto_owner" not in {r["name"] for r in q("PRAGMA table_info(viewers)")}:
+        x("ALTER TABLE viewers ADD COLUMN auto_owner TEXT")   # the person an automatic page is for
+    # one automatic page per person, even when two threads make them at once
+    x("DELETE FROM viewers WHERE auto_owner IS NOT NULL AND id NOT IN "
+      "(SELECT MIN(id) FROM viewers WHERE auto_owner IS NOT NULL GROUP BY auto_owner)")
+    x("CREATE UNIQUE INDEX IF NOT EXISTS viewers_auto ON viewers(auto_owner) WHERE auto_owner IS NOT NULL")
     try:
         DB_PATH.chmod(0o600)
     except OSError:
@@ -185,10 +207,41 @@ def add_point(dev_id: str, ts: float, lat: float, lon: float, *, acc: float | No
 
 
 def add_event(kind: str, message: str, *, device_id: str | None = None,
-              geofence_id: int | None = None, ts: float | None = None) -> int:
-    cur = x("INSERT INTO events(ts,kind,device_id,geofence_id,message) VALUES(?,?,?,?,?)",
-            (ts or time.time(), kind, device_id, geofence_id, message))
+              geofence_id: int | None = None, ts: float | None = None, viewer_id: int | None = None) -> int:
+    cur = x("INSERT INTO events(ts,kind,device_id,geofence_id,message,viewer_id) VALUES(?,?,?,?,?,?)",
+            (ts or time.time(), kind, device_id, geofence_id, message, viewer_id))
     return cur.lastrowid
+
+
+def viewer(vid: int) -> dict | None:
+    v = q1("SELECT * FROM viewers WHERE id=?", (vid,))
+    if v:
+        v["people"] = json.loads(v["people"] or "[]")
+    return v
+
+
+def ensure_person_pages(new_token) -> list[str]:
+    """Every family member gets their own user page showing just them, made automatically. A page
+    deleted on purpose is remembered (setting person_pages_off) and not made again. Returns the
+    owners a page was made for."""
+    off = set(get_setting("person_pages_off", []))
+    made = []
+    for r in q("SELECT owner, MIN(first_seen) f FROM devices WHERE owner IS NOT NULL AND source='icloud' "
+               "GROUP BY owner ORDER BY f"):
+        o = r["owner"]
+        if o in off or q1("SELECT id FROM viewers WHERE auto_owner=?", (o,)):
+            continue
+        if x("INSERT OR IGNORE INTO viewers(name,token,people,created,auto_owner) VALUES(?,?,?,?,?)",
+             (person_display(o) or o, new_token(), json.dumps([o]), time.time(), o)).rowcount:
+            made.append(o)
+    return made
+
+
+def viewer_by_token(token: str) -> dict | None:
+    v = q1("SELECT * FROM viewers WHERE token=?", (token,))
+    if v:
+        v["people"] = json.loads(v["people"] or "[]")
+    return v
 
 
 BACKUP_DIR = DATA_DIR / "backups"

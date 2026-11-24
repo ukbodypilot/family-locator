@@ -30,6 +30,10 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
   at rest) and reads every minute, within Apple's
   own limits. It never hammers.
 - **Daily summary email.** Every evening: who went where, how far, and a link per person.
+- **User pages for relatives.** Give Grandma her own page showing only the grandchildren: the
+  same map, timeline and playback, her own places and alerts to her email, and a morning email
+  with yesterday's summary and today's link. No tracking settings, no password: a secret link you
+  can revoke at any time.
 - **Works on a phone, from anywhere,** through the radio gateway's Cloudflare tunnel. Email links
   always carry the current address.
 - **Rich map.** 12 base maps including satellite, hybrid, terrain, public transport and two dark styles, a railway overlay, zoom to
@@ -43,6 +47,7 @@ My locations, shows people on a map and a per-person timeline, and sends alerts 
 | ![Playback on the freeway: the map follows Alex, the marker shows 75 mph, the track is coloured by speed](docs/images/history-lanes.png) | ![Phone layout: full-screen map, speed legend and the folded timeline](docs/images/phone-map.png) |
 | **Heatmap** | **Places** |
 | ![Heatmap of 30 days: home, the park and the routes between](docs/images/heatmap.png) | ![The Places tab with saved places and their circles on the map](docs/images/places.png) |
+| ![A user page: Grandma sees only Sam, with her own alerts and daily email](docs/images/user-page.png) | ![The User pages card on the Setup tab](docs/images/user-pages-admin.png) |
 
 ## Keeping an eye on a new driver
 
@@ -94,6 +99,7 @@ walkthrough, including a manual install, is in [Getting started](docs/getting-st
 | [Tracking and following](docs/tracking.md) | Per-person intervals, following people while they move, what it costs |
 | [Alerts and the daily summary](docs/alerts.md) | What triggers an email, per-person rules, quiet hours |
 | [Phone access](docs/phone-access.md) | Using it from anywhere through the radio gateway's tunnel |
+| [User pages](docs/user-pages.md) | Cut-down pages for relatives: chosen people, their own places and alerts, a secret link |
 | [AirTags and photo history](docs/airtags-and-photos.md) | FindMy.py keys, importing past locations from photos |
 | [Configuration](docs/configuration.md) | Every setting, in the UI and in `data/config.toml` |
 | [Privacy and security](docs/privacy-and-security.md) | What's stored, where, what leaves the machine, passwords |

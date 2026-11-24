@@ -33,6 +33,11 @@ async function api(path, opts = {}) {
   catch (e) { throw e.name === "AbortError" ? new Error("The server didn't answer in time.") : e; }
   finally { clearTimeout(timer); }
   if (r.status === 401 && !path.includes("api/auth/")) { showAuth(); throw new Error("Signed out. Sign in again."); }
+  // a user page whose link was replaced or deleted: reload, and the server shows "this link doesn't work"
+  if (r.status === 404 && BASE.includes("/v/") && (r.headers.get("content-type") || "").includes("json")) {
+    const d = await r.clone().json().catch(() => ({}));
+    if (d.error === "dead link") { location.reload(); throw new Error("This link doesn't work any more."); }
+  }
   const ct = r.headers.get("content-type") || "";
   const data = ct.includes("json") ? await r.json() : await r.text();
   if (!r.ok) throw new Error((data && data.detail) || (data && data.error) || r.statusText);
@@ -885,7 +890,7 @@ function popupEl(html, handlers) {
 }
 function personPopup(p) {
   const st = personStatus(p), [ts, lat, lon, acc] = st.pos.p, d = st.pos.dev;
-  const canLocate = d.source === "icloud", sp = avgSpeed(st.pos);
+  const canLocate = !S.viewer && d.source === "icloud", sp = avgSpeed(st.pos);
   return popupEl(`<h3>${esc(p.display)}</h3><p>${st.text}</p>
     <table><tr><td>Fix</td><td>${esc(dt(ts))} (${esc(ago(ts))})</td></tr>
     <tr><td>From</td><td>${esc(d.name)}</td></tr>
@@ -913,7 +918,7 @@ function fixPopup(d, p, current = false) {
     ${kind ? `<tr><td>Source</td><td>${esc(kind)}</td></tr>` : ""}
     ${meta && meta.file ? `<tr><td>Photo</td><td>${esc(String(meta.file).split("/").pop())}</td></tr>` : ""}
     <tr><td>Position</td><td>${lat.toFixed(5)}, ${lon.toFixed(5)}</td></tr></table>
-    <div class="acts">${current && d.source === "icloud" ? '<a data-a="locate">Locate now</a>' : ""}<a data-a="here">What's here?</a>
+    <div class="acts">${current && !S.viewer && d.source === "icloud" ? '<a data-a="locate">Locate now</a>' : ""}<a data-a="here">What's here?</a>
     <a data-a="place">Make this a place</a></div>`, {
     locate: () => locateOne(d), here: () => whatsHere(lat, lon), place: () => newPlace(lat, lon),
   });
@@ -989,6 +994,10 @@ function renderPeople() {
     bar.innerHTML = `<span>${nOn < S.people.length ? `Showing ${nOn} of ${S.people.length} people on the map` : "Some devices are hidden on the map"}</span><button class="btn small">Show all</button>`;
     $("button", bar).onclick = showEveryone; el.appendChild(bar);
   }
+  if (!S.devices.length && S.viewer) {
+    el.innerHTML = '<p class="muted">Nobody has been shared on this page yet.</p>';
+    return;
+  }
   if (!S.devices.length) {
     el.innerHTML = '<p class="muted">No one to show yet. Sign in to iCloud on the <a href="#setup" onclick="openTab(\'setup\')">Setup</a> tab and your family will appear here.</p>';
     return;
@@ -1019,8 +1028,8 @@ function renderPeople() {
     const go = () => { if (st.pos) { fly([st.pos.p[1], st.pos.p[2]], Math.max(map.getZoom(), 15)); setLock({ kind: "p", name: p.name }, [st.pos.p[1], st.pos.p[2]]); } else toast(`No location for ${p.display} yet.`); if (isPhone()) $("#app").classList.add("noside"); };
     $(".person-main", box).onclick = (e) => { if (e.target.closest(".eye")) return setMapOff(["p:" + p.name], pOn); if (e.target.closest(".person-more")) return personMenu(p, e.target.closest(".person-more")); go(); };
     $(".person-main", box).onkeydown = (e) => { if (e.target.closest("button")) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
-    $(".avatar", box).title = "Change colour";
-    $(".avatar", box).onclick = (e) => { e.stopPropagation(); pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); }); };
+    if (!S.viewer) $(".avatar", box).title = "Change colour";
+    if (!S.viewer) $(".avatar", box).onclick = (e) => { e.stopPropagation(); pickColor(p.color, async (c) => { await api(`/api/people/${encodeURIComponent(p.name)}`, { method: "PATCH", body: { color: c } }); await refreshAll(); }); };
     $(".devs-toggle", box).onclick = () => { open ? S.expanded.delete(p.name) : S.expanded.add(p.name); store.set("expanded", [...S.expanded]); renderPeople(); };
     el.appendChild(box);
   }
@@ -1055,15 +1064,19 @@ document.addEventListener("click", (e) => { if (!e.target.closest("#ctxMenu") &&
 function devMenu(d, btn) {
   const r = btn.getBoundingClientRect(); btn.setAttribute("aria-expanded", "true");
   const items = [];
-  if (d.source === "icloud" && (d.meta || {}).locationCapable !== false) items.push(["Locate now", () => locateOne(d)]);
+  if (!S.viewer && d.source === "icloud" && (d.meta || {}).locationCapable !== false) items.push(["Locate now", () => locateOne(d)]);
   if (d.last) items.push([`Show last known location (${ago(d.last.ts)})`, () => showLastKnown(d)]);
   items.push(["Insights and battery history", () => openInsights(d.id)]);
-  items.push(["Rename", async () => { const n = prompt("Name for this device", d.name); if (n) { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n } }); await refreshAll(); } }]);
-  items.push([d.hidden ? "Show this device" : "Hide this device", async () => { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { hidden: d.hidden ? 0 : 1 } }); await refreshAll(); }]);
+  if (!S.viewer) items.push(["Rename", async () => { const n = prompt("Name for this device", d.name); if (n) { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { name: n } }); await refreshAll(); } }]);
+  if (!S.viewer) items.push([d.hidden ? "Show this device" : "Hide this device", async () => { await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: "PATCH", body: { hidden: d.hidden ? 0 : 1 } }); await refreshAll(); }]);
   openMenu(r.left, r.bottom + 4, items, d.model || d.name);
 }
 function personMenu(p, btn) {
   const r = btn.getBoundingClientRect(); btn.setAttribute("aria-expanded", "true");
+  const showItem = S.people.filter(personOn).length === 1 && personOn(p)
+    ? ["Show everyone on the map", showEveryone] : [`Show only ${firstName(p.display)} on the map`, () => showOnly(p)];
+  const insItem = ["Insights", () => { const d = primaryOf(p) || p.carried[0]; if (d) openInsights(d.id); }];
+  if (S.viewer) return openMenu(r.left - 150, r.bottom + 4, [showItem, insItem], p.display);
   openMenu(r.left - 150, r.bottom + 4, [
     ["Rename", async () => {
       const n = prompt(`Name to show for ${p.display}. Leave blank to use Apple's name ("${p.name}").`, p.display === p.name ? "" : p.display);
@@ -1144,8 +1157,9 @@ function openTab(name) {
   $$("#tabs button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.dataset.body !== name));
   $("#app").classList.remove("noside");
-  if (name === "alerts") { loadEvents(); loadConfigForms(); }
-  if (name === "setup") { loadStatus(); loadConfigForms(); loadTrackingTable(); }
+  if (S.viewer && name === "setup") name = "people";
+  if (name === "alerts") { loadEvents(); if (S.viewer) loadMe().catch(() => {}); else loadConfigForms(); }
+  if (name === "setup") { loadStatus(); loadConfigForms(); loadTrackingTable(); loadViewers().then(() => $("#usersCard").classList.remove("hidden"), () => $("#usersCard").classList.add("hidden")); }
   if (name === "insights") loadInsights();
   if (name !== "insights") L_stays.clearLayers();
   history.replaceState(null, "", "#" + name);
@@ -1422,6 +1436,7 @@ $("#digestSend").onclick = (e) => busy(e.target, async () => { await api("/api/d
 const stateBadge = (s) => ({ ok: "ok", need_2fa: "warn", need_login: "bad", error: "bad" }[s] || "");
 const stateWord = (s) => ({ ok: "connected", need_2fa: "waiting for code", need_login: "sign in again", logged_out: "not signed in", error: "error" }[s] || s);
 async function loadStatus() {
+  if (S.viewer) return {};
   const st = await api("/api/status");
   const ic = st.icloud, at = st.airtag;
   $("#chips").innerHTML = [["iCloud", ic.state], ["AirTags", at.state], ["Email", st.email.configured ? "ok" : "off"]]
@@ -1480,6 +1495,61 @@ $("#phFolder").addEventListener("submit", (e) => { e.preventDefault(); busy(e.su
 function pollPhotos() { const iv = setInterval(async () => { const st = await loadStatus(); if (!st.photos.running) { clearInterval(iv); await refreshAll(); } }, 3000); }
 $("#emTest").onclick = (e) => busy(e.target, async () => toast("Sent a test email to " + (await api("/api/email/test", { method: "POST" })).to));
 $("#pwChange").addEventListener("submit", (e) => { e.preventDefault(); busy(e.submitter, async () => { await api("/api/auth/change", { method: "POST", body: { old: $("#pwOld").value, new: $("#pwNew").value } }); $("#pwOld").value = $("#pwNew").value = ""; toast("Changed the password."); }); });
+
+/* ---------------- user pages admin (main page only) ---------------- */
+let viewersCache = [];
+async function loadViewers() {
+  viewersCache = await api("/api/viewers");
+  const who = (v) => v.people.length ? v.people.map((n) => firstName(ownerName(n))).join(", ") : "nobody yet";
+  $("#vList").innerHTML = viewersCache.map((v) => `<div class="place-row vrow" data-id="${v.id}">
+      <div><div class="place-name">${esc(v.name)}${v.auto_owner ? ' <span class="muted small">(made automatically)</span>' : ""}</div>
+        <div class="sub">Sees ${esc(who(v))}. ${v.email ? `Alerts to ${esc(v.email)}` : "No email"}${v.digest ? `, daily email at ${v.digest_hour}:00` : ""}.
+          ${v.places} place${v.places === 1 ? "" : "s"}. ${v.last_seen ? `Last opened ${esc(ago(v.last_seen))}` : "Not opened yet"}.</div>
+        <div class="row gap" style="margin-top:6px;flex-wrap:wrap">
+          <button class="btn small" data-a="copy">Copy link</button>
+          ${v.email ? '<button class="btn small" data-a="send">Email the link</button>' : ""}
+          <button class="btn small" data-a="open">Open</button>
+          <button class="btn small" data-a="edit">Edit</button>
+          <button class="btn small" data-a="new">New link</button>
+        </div></div></div>`).join("") || '<p class="muted small">No user pages yet.</p>';
+}
+function showViewerForm(v) {
+  $("#vForm").classList.remove("hidden");
+  $("#vId").value = v.id || ""; $("#vName").value = v.name || ""; $("#vEmail").value = v.email || "";
+  $("#vDigest").checked = !!v.digest; $("#vHour").value = v.digest_hour ?? 8;
+  $("#vPeople").innerHTML = S.people.map((p) => `<label class="toggle"><input type="checkbox" value="${esc(p.name)}" ${(v.people || []).includes(p.name) ? "checked" : ""}> ${esc(p.display)}</label>`).join("");
+  $("#vDelete").classList.toggle("hidden", !v.id);
+  $("#vName").focus();
+}
+$("#vAdd").onclick = () => showViewerForm({});
+$("#vCancel").onclick = () => $("#vForm").classList.add("hidden");
+$("#vForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  busy(e.submitter, async () => {
+    const id = $("#vId").value, body = { name: $("#vName").value, email: $("#vEmail").value, digest: $("#vDigest").checked,
+      digest_hour: Number($("#vHour").value), people: $$("#vPeople input:checked").map((i) => i.value) };
+    const v = await api(id ? `/api/viewers/${id}` : "/api/viewers", { method: id ? "PUT" : "POST", body });
+    $("#vForm").classList.add("hidden"); await loadViewers();
+    toast(id ? "Saved." : `Made ${v.name}'s page. Copy or email the link to them.`, 5000);
+  });
+});
+$("#vDelete").onclick = (e) => {
+  const id = $("#vId").value, v = viewersCache.find((x) => String(x.id) === id);
+  if (v && confirm(`Delete ${v.name}'s page? The link stops working, and its places and alerts are deleted.${v.auto_owner ? " It won't be made again automatically." : ""}`))
+    busy(e.target, async () => { await api(`/api/viewers/${id}`, { method: "DELETE" }); $("#vForm").classList.add("hidden"); await loadViewers(); toast("Deleted."); });
+};
+$("#vList").onclick = (e) => {
+  const b = e.target.closest("[data-a]"), row = e.target.closest(".vrow"); if (!b || !row) return;
+  const v = viewersCache.find((x) => String(x.id) === row.dataset.id); if (!v) return;
+  const link = v.link || v.lan_link;
+  const act = b.dataset.a;
+  if (act === "edit") return showViewerForm(v);
+  if (act === "open") return window.open(link, "_blank", "noopener");
+  if (act === "copy") return navigator.clipboard?.writeText(link).then(() => toast(v.link ? "Copied the link." : "Copied the home-Wi-Fi link (the outside link is down right now)."), () => toast(link, 10000));
+  if (act === "send") return busy(b, async () => { const r = await api(`/api/viewers/${v.id}/send-link`, { method: "POST" }); toast(`Emailed the link to ${r.to}.`); });
+  if (act === "new" && confirm(`Make a new link for ${v.name}? The current link stops working straight away.`))
+    return busy(b, async () => { await api(`/api/viewers/${v.id}/new-link`, { method: "POST" }); await loadViewers(); toast("New link made. Send it to them."); });
+};
 
 /* ---------------- refresh loop ---------------- */
 async function refreshAll() {
@@ -1590,7 +1660,32 @@ async function start() {
   setInterval(() => loadStatus().catch(() => {}), 20000);
 }
 
+/* ---------------- user pages (v2) ----------------
+   The same page, opened through a user page link (/v/<token>/): the server only answers for the people
+   chosen for it, and refuses tracking, settings and accounts. Here we just take away the controls that
+   would only ever get "not available" back, and give the Alerts tab the user's own box. */
+function setupViewer(v) {
+  S.viewer = v;
+  $("#app").classList.add("viewer");
+  $(".brand-text").textContent = `Family Locator · ${v.name}`;
+  document.title = `Family Locator · ${v.name}`;
+  for (const sel of ['[data-tab="setup"]', "#tab-setup", "#logoutBtn", "#chips", "#rulesPanel"]) { const el = $(sel); if (el) el.remove(); }
+  const sh = $("#showHidden"); if (sh && sh.closest("label")) sh.closest("label").remove();
+  $$('#evKind option').forEach((o) => { if (!["", "enter", "exit"].includes(o.value)) o.remove(); });
+  $("#viewerPanel").classList.remove("hidden");
+}
+async function loadMe() {
+  const me = await api("/api/me");
+  $("#vpEmail").textContent = me.email ? `Arrivals and departures at your places are emailed to ${me.email}. Add places on the Places tab.`
+    : "No email address is set for this page, so alerts are only listed here. Ask the person who sent you the link to add one.";
+  $("#vpDigest").value = me.digest ? "1" : "0";
+  $("#vpDigest").disabled = !me.email;
+}
+$("#vpDigest").onchange = (e) => busy(e.target, async () => { await api("/api/me", { method: "PUT", body: { digest: e.target.value === "1" } }); toast(e.target.value === "1" ? "Daily email on." : "Daily email off."); });
+$("#vpPreview").onclick = (e) => busy(e.target, async () => { const r = await api("/api/me/digest"); $("#vpBox").textContent = `${r.subject}\n\n${r.body}`; $("#vpBox").classList.remove("hidden"); });
+
 (async () => {
   const st = await api("/api/auth/state");
+  if (st.viewer) setupViewer(st.viewer);
   if (st.authed) start(); else showAuth();
 })();

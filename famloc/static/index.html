@@ -119,6 +119,14 @@
     </section>
 
     <section class="tab-body hidden" id="tab-alerts" role="tabpanel" data-body="alerts">
+      <div class="panel hidden" id="viewerPanel">
+        <h2>Your alerts</h2>
+        <p class="muted small" id="vpEmail"></p>
+        <label class="cfg-row"><span>Daily email: yesterday's summary and today's link</span>
+          <select id="vpDigest" aria-label="Daily email"><option value="1">On</option><option value="0">Off</option></select></label>
+        <div class="row gap"><button class="btn small" id="vpPreview">Preview the daily email</button></div>
+        <pre id="vpBox" class="digest hidden"></pre>
+      </div>
       <details class="panel" id="rulesPanel">
         <summary><h2>Alert settings</h2></summary>
         <p class="muted small">Place alerts are set per place on the Places tab. These apply to everything.</p>
@@ -165,6 +173,29 @@
         <p class="muted small">This link goes through the radio gateway's Cloudflare tunnel, so it works anywhere. Your browser asks for the gateway password first, then this page's password. The address changes when the tunnel restarts; the emails always carry the current one.</p>
         <p id="pubLink" class="small"></p>
         <p id="lanLink" class="small muted"></p>
+      </div>
+      <div class="panel" id="usersCard">
+        <div class="head-row"><h2>User pages</h2><button class="btn small primary" id="vAdd">Add a user page</button></div>
+        <p class="muted small">A cut-down page for someone else, such as a grandparent: only the people you choose, with
+          the timeline, places and their own alerts, but no tracking settings. <b>It opens with a secret link and no
+          password, so anyone who has the link can see those people.</b> If a link gets passed on, make a new one: the
+          old one stops working at once.</p>
+        <form id="vForm" class="place-form hidden">
+          <input type="hidden" id="vId">
+          <label>Name <input id="vName" required maxlength="60" placeholder="Grandma"></label>
+          <label>Email for their alerts and daily email <input id="vEmail" type="email" placeholder="optional"></label>
+          <fieldset><legend>People they can see</legend><div id="vPeople" class="checks"></div></fieldset>
+          <fieldset class="checks-row"><legend>Daily email</legend>
+            <label class="toggle"><input type="checkbox" id="vDigest"> yesterday's summary and today's link, at</label>
+            <label class="toggle"><input type="number" id="vHour" min="0" max="23" value="8" style="width:4.5em"> h</label>
+          </fieldset>
+          <div class="row end gap">
+            <button type="button" class="btn small danger hidden" id="vDelete">Delete page</button>
+            <button type="button" class="btn small" id="vCancel">Cancel</button>
+            <button type="submit" class="btn small primary">Save</button>
+          </div>
+        </form>
+        <div id="vList"></div>
       </div>
       <div class="panel">
         <h2>Tracking</h2>

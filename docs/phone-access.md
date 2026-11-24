@@ -56,12 +56,17 @@ The route lives in the radio gateway (`handle_family_proxy` in `web_routes_get.p
 `/family` and `/family/` are on the gateway's list of pages that may be opened from links on other
 sites. Without that, links in Gmail would be refused as cross-site.
 
+[User pages](user-pages.md) (`/family/v/<secret>/`) and the app's public page files
+(`/family/static/`) skip the gateway login and may also be opened from an email link: the secret
+in the link is the key, and the app checks and throttles it. Everything else under `/family/`
+still needs the gateway login.
+
 The gateway only handles GET and POST. The app sends its edit and delete requests as POST with an
 `X-HTTP-Method-Override` header, which the app honours.
 
 ## Security
 
-From outside, two passwords stand in the way: the gateway's (`WEB_CONFIG_USERNAME` and
+For your own page, from outside, two passwords stand in the way: the gateway's (`WEB_CONFIG_USERNAME` and
 `WEB_CONFIG_PASSWORD` in `gateway_config.txt`) and the app's. The gateway's is currently `user` /
 `user`, so the app's password is what really protects the location data. Use a strong one. After
 5 wrong attempts from one address, logins from it are blocked for 5 minutes. Every sign-in and
@@ -70,6 +75,8 @@ failure is logged with the visitor's address:
 ```bash
 journalctl --user-unit family-locator | grep WebAccess
 ```
+
+User pages have no password at all; their link is the key. See [User pages](user-pages.md).
 
 More in [Privacy and security](privacy-and-security.md).
 

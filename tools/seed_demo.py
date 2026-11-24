@@ -138,6 +138,15 @@ for name, color, r in (("Home", "#577f5b", 150), ("School", "#b7791f", 200), ("W
     db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices,people) VALUES(?,?,?,?,?,1,1,'[]','[]')",
          (name, la, lo, r, color))
 
+# A user page (v2): Grandma sees Sam only, with her own place. The link is fixed so screenshots can use it.
+db.x("DELETE FROM viewers WHERE name='Grandma'")
+vid = db.x("INSERT INTO viewers(name,token,email,people,digest,digest_hour,created) VALUES(?,?,?,?,1,8,?)",
+           ("Grandma", "demo-grandma-link-0123456789abcdef", "grandma@example.com", '["Sam"]', now - 3 * 86400)).lastrowid
+db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices,people,viewer_id) "
+     "VALUES('School',?,?,200,'#b7791f',1,1,'[]','[\"Sam\"]',?)", (*PLACES["School"], vid))
+db.x("INSERT INTO geofences(name,lat,lon,radius,color,on_enter,on_exit,devices,people,viewer_id) "
+     "VALUES('Park',?,?,400,'#4f8a3c',1,1,'[]','[\"Sam\"]',?)", (*PLACES["Park"], vid))
+
 # Replay the last two days through the real alert logic (email off) so the activity log has entries.
 from famloc.alerts import Alerter  # noqa: E402
 al = Alerter(config.Config(email_enabled=False))

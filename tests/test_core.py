@@ -1,4 +1,5 @@
-"""Run: FAMLOC_DATA=$(mktemp -d) .venv/bin/python -m pytest -q tests  (or plain python)."""
+"""Run: FAMLOC_DATA=$(mktemp -d) .venv/bin/python -m pytest -q tests  (or plain python).
+The user-page API tests use FastAPI's TestClient, which needs httpx: .venv/bin/pip install httpx"""
 import json, os, sys, tempfile
 os.environ.setdefault("FAMLOC_DATA", tempfile.mkdtemp())
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -638,6 +639,175 @@ def test_tracker_ignores_a_rough_spike():
     drive = [(5000 + 60 * i, 37.77 + 0.004 * i, -122.42, 80 if i % 2 else 10) for i in range(6)]
     assert t.on_fixes("Dr", drive, drive[-1][0])               # a real drive with rough fixes still counts
 
+
+
+# ---------------------------------------------------------------- v2 user pages
+def _client():
+    import warnings
+    warnings.filterwarnings("ignore")
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from famloc import web
+    tracker = SimpleNamespace(status=lambda *a, **k: {"mode": "x"}, family_status=lambda *a: {})
+    icloud = SimpleNamespace(tracker=tracker, status=lambda: {}, poke=lambda: None)
+    stub = SimpleNamespace(status=lambda: {})
+    web._fails.clear()
+    app = web.create_app(cfg, icloud, stub, stub, al)
+    return TestClient(app), web
+
+
+def _users_world():
+    """Two people with phones and a point each, one main-page place, one user page that shows only Kim."""
+    for o, dev, lat in (("Kim", "icloud:kim", 38.0), ("Lee", "icloud:lee", 38.5)):
+        db.upsert_device(dev, "icloud", f"{o} phone", owner=o, device_class="iPhone")
+        db.add_point(dev, 1000, lat, -120.0, acc=5)
+    db.upsert_device("photos:t", "photos", "Photos", owner="Kim", device_class="Photos")
+    db.add_point("photos:t", 900, 38.0, -120.0, kind="photo")
+    db.x("DELETE FROM viewers"); db.x("DELETE FROM geofences WHERE name LIKE 'U-%'")
+    db.x("INSERT INTO geofences(name,lat,lon,radius) VALUES('U-main',38.0,-120.0,150)")
+
+
+def _main_login(c):
+    from famloc import web
+    if not db.get_setting("ui_password"):
+        c.post("api/auth/setup", json={"password": "testpass123"})
+    r = c.post("api/auth/login", json={"password": "testpass123"})
+    assert r.status_code == 200, r.text
+
+
+def test_user_page_link_and_scope():
+    c, web = _client()
+    _users_world()
+    _main_login(c)
+    v = c.post("api/viewers", json={"name": "Gran", "email": "gran@example.com", "people": ["Kim"]}).json()
+    tok = v["lan_link"].rstrip("/").split("/")[-1]
+    assert v["lan_link"].endswith(f"v/{tok}/") and len(tok) >= 30
+    u = TestClientNoCookies = __import__("fastapi.testclient", fromlist=["TestClient"]).TestClient(c.app)
+    base = f"v/{tok}/"
+    # page: served with relative assets and a referrer policy; the bare path redirects
+    r = u.get(f"v/{tok}", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == f"{tok}/"
+    r = u.get(base)
+    assert r.status_code == 200 and '"../../static/app.js' in r.text and 'name="referrer"' in r.text
+    st = u.get(base + "api/auth/state").json()
+    assert st["authed"] and st["viewer"]["name"] == "Gran" and st["viewer"]["people"] == ["Kim"]
+    # only Kim, no photos, no tracking state
+    assert [d["id"] for d in u.get(base + "api/devices").json()] == ["icloud:kim"]
+    assert [p["name"] for p in u.get(base + "api/people").json()] == ["Kim"]
+    assert all(p["tracking"] is None for p in u.get(base + "api/people").json())
+    pts = u.get(base + "api/points", params={"start": 0, "end": 5000}).json()["points"]
+    assert set(pts) == {"icloud:kim"}
+    pts = u.get(base + "api/points", params={"start": 0, "end": 5000, "devices": "icloud:lee,photos:t"}).json()["points"]
+    assert pts == {}, "naming someone else's device must not leak it"
+    assert u.get(base + "api/analysis", params={"device": "icloud:lee", "start": 0, "end": 5000}).status_code == 404
+    # closed by default: tracking, settings, accounts, the user list
+    for m, path in (("GET", "api/config"), ("PUT", "api/config"), ("POST", "api/icloud/poll"), ("GET", "api/viewers"),
+                    ("POST", "api/people/Kim/follow"), ("GET", "api/icloud/locate-log"), ("POST", "api/email/test"),
+                    ("GET", "api/digest"), ("POST", "api/auth/change"), ("GET", "metrics")):
+        assert u.request(m, base + path).status_code == 403, path
+    # own places only, both ways
+    assert u.get(base + "api/geofences").json() == []
+    gid = u.post(base + "api/geofences", json={"name": "U-gran", "lat": 38.0, "lon": -120.0, "people": ["Kim", "Lee"]}).json()["id"]
+    mine = u.get(base + "api/geofences").json()
+    assert [g["name"] for g in mine] == ["U-gran"] and mine[0]["people"] == ["Kim"], "people clipped to the page's"
+    main_ids = [g["id"] for g in c.get("api/geofences").json()]
+    assert gid not in main_ids and any(g["name"] == "U-main" for g in c.get("api/geofences").json())
+    main_gid = db.q1("SELECT id FROM geofences WHERE name='U-main'")["id"]
+    body = {"name": "x", "lat": 1, "lon": 1}
+    assert u.put(base + f"api/geofences/{main_gid}", json=body).status_code == 404
+    assert u.delete(base + f"api/geofences/{main_gid}").status_code == 404
+    assert c.put(f"api/geofences/{gid}", json=body).status_code == 404, "main page can't edit a user's place by id"
+    # daily email switch is the user's; the address is not
+    assert u.put(base + "api/me", json={"digest": True, "email": "evil@example.com"}).json()["digest"] == 1
+    assert db.viewer(v["id"])["email"] == "gran@example.com"
+    # a new link kills the old one; deleting removes their places
+    v2 = c.post(f"api/viewers/{v['id']}/new-link").json()
+    assert u.get(base + "api/devices").status_code == 404
+    tok2 = v2["lan_link"].rstrip("/").split("/")[-1]
+    assert u.get(f"v/{tok2}/api/devices").status_code == 200
+    assert c.delete(f"api/viewers/{v['id']}").json()["ok"]
+    assert not db.q1("SELECT id FROM geofences WHERE id=?", (gid,))
+
+
+def test_user_page_unknown_links_are_throttled():
+    c, web = _client()
+    web._bad_links.clear()
+    stale = [c.get("v/" + "x" * 32 + "/api/devices").status_code for _ in range(30)]
+    assert stale == [404] * 30, "a stale tab retrying one dead link never locks anyone out"
+    r = c.get("v/" + "x" * 32 + "/")
+    assert r.status_code == 404 and "doesn't work any more" in r.text, "the page itself explains"
+    codes = [c.get(f"v/{i:032d}/api/devices").status_code for i in range(10)]
+    assert codes == [404] * 9 + [429], codes            # 10 different wrong links: guessing
+    assert c.post("api/auth/login", json={"password": "nope-nope"}).status_code == 401, "password lockout is separate"
+    web._bad_links.clear(); web._fails.clear()
+
+
+def test_user_page_alerts_and_daily_email():
+    import time as _t
+    from famloc.alerts import build_digest, yesterday
+    db.upsert_device("icloud:ka", "icloud", "Kai phone", owner="Kai", device_class="iPhone")
+    db.upsert_device("icloud:jo", "icloud", "Jo phone", owner="Jo", device_class="iPhone")
+    tok = "t" * 32
+    db.x("DELETE FROM viewers")
+    vid = db.x("INSERT INTO viewers(name,token,email,people,digest) VALUES('Aunt',?, 'aunt@example.com', '[\"Kai\"]', 1)",
+               (tok,)).lastrowid
+    ug = db.x("INSERT INTO geofences(name,lat,lon,radius,viewer_id) VALUES('Aunt-house',39.0,-121.0,150,?)", (vid,)).lastrowid
+    mg = db.x("INSERT INTO geofences(name,lat,lon,radius) VALUES('Main-school',39.0,-121.0,150)").lastrowid
+    sent = []
+    old = (al.send_email, al.smtp_ready, al.email_configured, cfg.public_url)
+    al.send_email = lambda subj, body, viewer=None: sent.append((subj, body, viewer and viewer["email"]))
+    al.smtp_ready = al.email_configured = lambda: True
+    cfg.public_url = "https://tunnel.example/family/"
+    try:
+        for dev in ("icloud:ka", "icloud:jo"):
+            d = db.q1("SELECT * FROM devices WHERE id=?", (dev,))
+            al.check_fix(d, 100, 39.0, -121.0, 5)      # learn: inside both
+            al.check_fix(d, 200, 39.02, -121.0, 5)     # leave
+        for _ in range(50):
+            if len(sent) >= 3: break
+            _t.sleep(0.02)
+    finally:
+        al.send_email, al.smtp_ready, al.email_configured, cfg.public_url = old
+    to_aunt = [x for x in sent if x[2] == "aunt@example.com"]
+    to_main = [x for x in sent if x[2] is None]
+    assert len(to_aunt) == 1 and "Kai left Aunt-house" in to_aunt[0][1], sent      # Jo isn't on her page
+    assert f"https://tunnel.example/family/v/{tok}/" in to_aunt[0][1]
+    assert "home Wi-Fi" not in to_aunt[0][1] and "#lanes" not in to_aunt[0][1], "no main-page links in a user email"
+    assert {x[0] for x in to_main} == {"Kai left Main-school", "Jo left Main-school"}
+    assert all("Aunt-house" not in x[1] for x in to_main)
+    ev = db.q("SELECT viewer_id, geofence_id FROM events WHERE geofence_id IN (?,?)", (ug, mg))
+    assert {(e["viewer_id"], e["geofence_id"]) for e in ev} == {(vid, ug), (None, mg)}
+    # daily summaries: the main one ignores her place; hers is yesterday, Kai only, link first
+    t0, t1 = yesterday(_t.time())
+    assert t1 - t0 in (82800, 86400, 90000) and t1 <= _t.time()
+    v = db.viewer(vid)
+    cfg.public_url = "https://tunnel.example/family/"
+    try:
+        _, body = build_digest(cfg, viewer=v)
+        _, main = build_digest(cfg)
+    finally:
+        cfg.public_url = ""
+    assert body.startswith(f"Your link for today: https://tunnel.example/family/v/{tok}/")
+    assert "Kai" in body and "Jo" not in body and "Main-school" not in body
+    assert "Aunt-house" not in main
+    assert f"Aunt (sees Kai)\n    https://tunnel.example/family/v/{tok}/" in main, "main summary lists user page links"
+
+
+def test_every_person_gets_their_own_page():
+    from famloc.web import new_token
+    db.x("DELETE FROM viewers"); db.set_setting("person_pages_off", [])
+    db.upsert_device("icloud:pp1", "icloud", "Pat phone", owner="Pat", device_class="iPhone")
+    db.ensure_person_pages(new_token)
+    pat = db.q1("SELECT * FROM viewers WHERE auto_owner='Pat'")
+    assert pat and json.loads(pat["people"]) == ["Pat"]
+    n = db.q1("SELECT COUNT(*) n FROM viewers")["n"]
+    db.ensure_person_pages(new_token)
+    assert db.q1("SELECT COUNT(*) n FROM viewers")["n"] == n, "never doubles up"
+    c, web = _client(); _main_login(c)
+    assert c.delete(f"api/viewers/{pat['id']}").json()["ok"]
+    db.ensure_person_pages(new_token)
+    assert not db.q1("SELECT id FROM viewers WHERE auto_owner='Pat'"), "a deleted automatic page stays deleted"
+    db.set_setting("person_pages_off", [])
 
 if __name__ == "__main__":
     for n, f in list(globals().items()):

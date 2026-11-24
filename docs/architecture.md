@@ -88,6 +88,14 @@ Every route except `/`, `/static/*`, `/metrics` and the `auth` routes needs the 
 Bodies are JSON. Behind the gateway, PUT, PATCH and DELETE arrive as POST with
 `X-HTTP-Method-Override`.
 
+**User pages** live at `/v/<secret>/`. The middleware looks the secret up in the `viewers` table
+(an unknown one counts as a failed login), then rewrites `/v/<secret>/api/...` to the normal route
+with the viewer attached. Only an allow-list of read routes plus that page's own places and
+`/api/me` is reachable; anything else answers 403. Each route then scopes its answer to the page's
+people (devices, points, range, analysis, people) or to its own rows (`geofences.viewer_id`,
+`events.viewer_id`). The page is served with relative asset paths and `Referrer-Policy:
+strict-origin`, so the secret never leaves in a Referer header.
+
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/auth/state` | Is a password set; are you signed in; version. |
@@ -116,13 +124,20 @@ Bodies are JSON. Behind the gateway, PUT, PATCH and DELETE arrive as POST with
 | GET | `/api/digest`; POST `/api/digest/send` | Preview or send the daily summary. |
 | POST | `/api/email/test` | Send a test email. |
 | GET | `/api/geocode?q[&lat&lon]`, `/api/reverse?lat&lon` | Address search and "What's here?". |
+| GET, POST | `/api/viewers` | List or create user pages (main page only). |
+| PUT, DELETE | `/api/viewers/{id}` | Edit or delete one; deleting removes its places and alerts. |
+| POST | `/api/viewers/{id}/new-link`, `/send-link` | Replace the link (the old one stops at once); email it. |
+| GET | `/api/viewers/{id}/digest` | Preview that page's daily email. |
+| GET, PUT | `/api/me`; GET `/api/me/digest` | On a user page: its settings (`{digest}` is the only writable field) and its daily email preview. |
 | GET | `/metrics` | Prometheus text: source state, polls, errors, new fixes, emails, point count. |
 
 ## Tests
 
 `tests/test_core.py` covers place enter/exit with the margin, ignoring stale and inaccurate fixes,
 one email per person, people filters, quiet hours, battery alert re-arming, stays and trips,
-duplicate fixes, display names, the daily summary, the tracker (intervals, staggering, movement versus GPS wobble, follow and rest, the safety cap, manual follow), and a simulated drive through the real poller against a fake Find My.
+duplicate fixes, display names, the daily summary, user pages (link access, throttling, scoping
+of every route, own places both ways, alerts and daily email to the user only, new link and
+delete), the tracker (intervals, staggering, movement versus GPS wobble, follow and rest, the safety cap, manual follow), and a simulated drive through the real poller against a fake Find My.
 
 ```bash
 FAMLOC_DATA=$(mktemp -d) .venv/bin/python tests/test_core.py

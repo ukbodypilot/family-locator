@@ -62,6 +62,9 @@ bundled with the app.
 - **Login throttling:** after 5 wrong passwords from one address, logins from it are refused for
   5 minutes. Every attempt is logged with the address, as `[WebAccess]` lines:
   `journalctl --user-unit family-locator | grep WebAccess`.
+- **User pages:** anyone with a user page's link can see the people chosen for it, with no
+  password. That page can't see anyone else, any setting or your places. **New link** revokes a
+  link straight away; wrong links are throttled like wrong passwords. See [User pages](user-pages.md).
 - **Changing the password:** Setup tab, **Web password**.
 - **No password yet:** a page with no password set accepts the first one anyone chooses. Set it
   straight after installing.

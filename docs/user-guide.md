@@ -210,6 +210,8 @@ changed on the Setup tab.
 
 - **iCloud Find My:** sign in or out, the status of polling, and **Locate everyone now**.
 - **Open on your phone:** the current outside link and the home link.
+- **User pages:** cut-down pages for relatives, each showing only the people you choose, opened
+  with a secret link. See [User pages](user-pages.md).
 - **Tracking:** a row per person, with **Fresh location** (Default, 1 min to 1 hour, or Never) and
   **Follow while moving** (Default, On, Off), and when their next fresh location is due. Below it
   are the global settings. See [Tracking and following](tracking.md).

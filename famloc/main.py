@@ -17,6 +17,22 @@ from .photos_import import PhotoImporter
 from .web import create_app
 
 
+def _viewer_digests(alerter: Alerter) -> None:
+    """User pages with the daily email on get yesterday's summary and today's link at their hour."""
+    from .alerts import build_digest
+    today, hour = time.strftime("%Y-%m-%d"), time.localtime().tm_hour
+    for r in db.q("SELECT id FROM viewers WHERE digest=1 AND email IS NOT NULL AND email!='' "
+                  "AND digest_hour=? AND (last_digest IS NULL OR last_digest!=?)", (hour, today)):
+        if not alerter.smtp_ready():
+            return
+        v = db.viewer(r["id"])
+        subj, body = build_digest(alerter.cfg, viewer=v)
+        err = alerter.send_email(subj, body, viewer=v)
+        db.x("UPDATE viewers SET last_digest=? WHERE id=?", (today, v["id"]))
+        db.add_event("info", f"Daily summary emailed to {v['name']}'s page" + (f" - FAILED: {err}" if err else ""),
+                     viewer_id=v["id"])
+
+
 def _housekeeping(alerter: Alerter, stop: threading.Event) -> None:
     log = logging.getLogger("famloc")
     while True:
@@ -35,6 +51,9 @@ def _housekeeping(alerter: Alerter, stop: threading.Event) -> None:
                 err = alerter.send_email(subj, body)
                 db.set_setting("last_digest", today)
                 db.add_event("info", f"Daily summary emailed" + (f" - FAILED: {err}" if err else ""))
+            from .web import new_token
+            db.ensure_person_pages(new_token)
+            _viewer_digests(alerter)
         except Exception:  # noqa: BLE001
             log.exception("housekeeping")
             db.add_event("error", "housekeeping/backup failed - see journal")
