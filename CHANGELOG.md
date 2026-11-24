@@ -2,6 +2,14 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [2.0.1] -- 2026-11-24
+
+- **Copy buttons work on the home address.** Browsers only allow the clipboard on https pages, so
+  on `http://<this machine>:8790` **Copy link** (User pages), the phone-link **Copy** button and
+  "Copy coordinates" silently copied nothing, and pasting gave whatever was on the clipboard
+  before. They now fall back to the older copy method, and if even that is blocked they show the
+  text in a box to copy by hand.
+
 ## [2.0.0] -- 2026-11-23
 
 User pages: a cut-down page for each family member, or for a relative, opened with a secret link.
