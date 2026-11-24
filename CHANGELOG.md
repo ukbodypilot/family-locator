@@ -2,6 +2,16 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [1.12.2] -- 2026-11-23
+
+New speed colours, with a band for trains and planes.
+
+- **Speed colours re-banded:** purple walking (under 5 mph), blue 5–20, yellow 20–55, orange
+  55–75, red 75–90, and a new **magenta for over 90 mph**, so a bullet train or a plane no longer
+  looks like a fast freeway drive. Green is gone. The new magenta was checked against its
+  neighbour with the dataviz validator (colour-blind and normal vision, light and dark maps).
+  The legend widens to stay on one line on desktop.
+
 ## [1.12.1] -- 2026-11-23
 
 Alerts in the right order, and a page error fixed.
