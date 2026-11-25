@@ -44,6 +44,10 @@ class Config:
     # AirTags (FindMy.py)
     airtag_poll_minutes: int = 15
 
+    # Tesla: path to a separate Tesla poller's SQLite DB (blank = off); see famloc/tesla_source.py
+    tesla_db: str = ""
+    tesla_name: str = "Tesla"
+
     # Alerts
     email_enabled: bool = True
     email_address: str = ""

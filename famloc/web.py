@@ -143,7 +143,7 @@ def _throttled(ip: str) -> bool:
     return len(_fails[ip]) >= 5
 
 
-def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
+def create_app(cfg, icloud, airtag, photos, alerter, tesla=None) -> FastAPI:
     app = FastAPI(title="Family Locator", version=__version__, docs_url=None, redoc_url=None)
     db.ensure_person_pages(new_token)
 
@@ -402,6 +402,7 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
         if viewer_of(request):
             return {"version": __version__, "viewer": True}
         return {"version": __version__, "icloud": icloud.status(), "airtag": airtag.status(),
+                "tesla": tesla.status() if tesla else None,
                 "family_requests": icloud.tracker.family_status(time.time()),
                 "photos": photos.status(), "backup": db.get_setting("last_backup"),
                 "links": {"public": public_url(cfg), "lan": lan_url(cfg)},
@@ -415,7 +416,8 @@ def create_app(cfg, icloud, airtag, photos, alerter) -> FastAPI:
     @app.get("/metrics")
     def metrics():
         lines = []
-        for src, st in (("icloud", icloud.status()), ("airtag", airtag.status())):
+        for src, st in (("icloud", icloud.status()), ("airtag", airtag.status()),
+                        *((("tesla", tesla.status()),) if tesla and tesla.state != "off" else ())):
             lines.append(f'famloc_source_ok{{source="{src}"}} {1 if st["state"] == "ok" else 0}')
             for k in ("polls", "poll_errors", "new_points"):
                 lines.append(f'famloc_{k}_total{{source="{src}"}} {st[k]}')

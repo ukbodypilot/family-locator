@@ -11,6 +11,7 @@ import uvicorn
 
 from . import config, db
 from .airtag_source import AirTagSource
+from .tesla_source import TeslaSource
 from .alerts import Alerter
 from .icloud_source import ICloudSource
 from .photos_import import PhotoImporter
@@ -72,12 +73,14 @@ def main() -> None:
     icloud = ICloudSource(cfg, alerter)
     airtag = AirTagSource(cfg, alerter)
     photos = PhotoImporter()
+    tesla = TeslaSource(cfg)
     stop = threading.Event()
-    for name, fn in (("icloud", icloud.run_forever), ("airtag", airtag.run_forever)):
+    for name, fn in (("icloud", icloud.run_forever), ("airtag", airtag.run_forever),
+                     ("tesla", tesla.run_forever)):
         threading.Thread(target=fn, args=(stop,), daemon=True, name=name).start()
     threading.Thread(target=_housekeeping, args=(alerter, stop), daemon=True, name="housekeeping").start()
     db.add_event("info", "Family Locator started", ts=time.time())
-    app = create_app(cfg, icloud, airtag, photos, alerter)
+    app = create_app(cfg, icloud, airtag, photos, alerter, tesla=tesla)
     try:
         uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="warning", access_log=False)
     finally:

@@ -111,11 +111,13 @@ const ICONS = {
   buds: '<circle cx="8" cy="8" r="3"/><path d="M8 11v8"/><circle cx="16" cy="8" r="3"/><path d="M16 11v8"/>',
   tag: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
   camera: '<rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l2-3h4l2 3"/>',
+  car: '<path d="M4 15.5l1.6-5a2 2 0 0 1 1.9-1.4h9a2 2 0 0 1 1.9 1.4l1.6 5v3h-16z"/><circle cx="8" cy="15.5" r="1.3"/><circle cx="16" cy="15.5" r="1.3"/><path d="M5 18.5v1.5M19 18.5v1.5"/>',
   dot: '<circle cx="12" cy="12" r="4"/>',
 };
 function kindOf(d) {
   const c = `${d.device_class || ""} ${d.model || ""}`;
   if (d.source === "photos") return "camera";
+  if (d.source === "tesla" || /^Car$/.test(d.device_class || "")) return "car";
   if (d.source === "airtag" || /AirTag/.test(c)) return "tag";
   if (/iPhone/.test(c)) return "phone";
   if (/iPad/.test(c)) return "tablet";
