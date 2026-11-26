@@ -1,35 +1,28 @@
-/* Family Locator - survey-map styling.
-   Ink, paper, contour (places), water (live / accent), woodland (at a place).
-   Barlow Semi Condensed for the interface; Source Serif 4 italic for place names, like a printed map. */
+/* Family Locator. Fonts, --t-* tokens, base elements and the Apps menu come from rig.css (the shared "rig front
+   panel" house style, vendored from radio-gateway). This page's own names map onto those tokens; it keeps one
+   motif of its own: Source Serif 4 italic for place names, like a printed map. Dark only. */
 :root {
-  --ink: #1e2b3a; --ink-2: #3a4757; --muted: #5e6b78; --paper: #f6f7f4; --panel: #fdfdfb;
-  --rule: #d9ddd6; --rule-2: #e9ece6; --water: #3f7fa3; --water-ink: #ffffff; --contour: #9a6b43;
-  --wood: #577f5b; --alert: #b3261e; --amber: #b7791f; --night: rgba(30, 43, 58, .07);
-  --lift: 0 1px 0 rgba(30, 43, 58, .06), 0 6px 20px rgba(30, 43, 58, .10);
-  --ui: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --ink: var(--t-text); --ink-2: color-mix(in srgb, var(--t-text) 72%, var(--t-text-dim)); --muted: var(--t-text-dim);
+  --paper: var(--t-bg); --panel: var(--t-panel); --rule: var(--t-border); --rule-2: var(--t-panel-hi);
+  --water: var(--t-accent); --water-ink: var(--t-glass);      /* live / accent = backlight amber */
+  --contour: #c8955f;                                         /* places: a map colour, not a status */
+  --wood: var(--t-ok); --alert: var(--t-err); --amber: var(--t-warn); --night: rgba(0, 0, 0, .22);
+  --lift: 0 1px 0 rgba(0, 0, 0, .3), 0 10px 24px rgba(0, 0, 0, .5);
+  --ui: var(--font-base);
   --place: "Source Serif 4", Georgia, serif;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --ink: #e4e8ec; --ink-2: #c3ccd5; --muted: #93a1ae; --paper: #182028; --panel: #1f2933;
-    --rule: #2e3a46; --rule-2: #26313c; --water: #6fa8c8; --water-ink: #10202b; --contour: #c8955f;
-    --wood: #7fb083; --alert: #ef6b62; --amber: #e0a648; --night: rgba(0, 0, 0, .22);
-    --lift: 0 1px 0 rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .45);
-    color-scheme: dark;
-  }
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; padding: 0; }
 body { background: var(--paper); color: var(--ink); font: 15px/1.35 var(--ui); font-variant-numeric: tabular-nums; }
 .hidden { display: none !important; }
 .muted { color: var(--muted); } .small { font-size: 13px; } .err { color: var(--alert); min-height: 1em; margin: 0; }
 .place-name { font-family: var(--place); font-style: italic; font-weight: 400; letter-spacing: .005em; }
-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; background: var(--rule-2); padding: 0 4px; border-radius: 3px; word-break: break-all; }
+code { font-family: var(--font-mono); font-size: 12px; background: var(--rule-2); padding: 0 4px; border-radius: 3px; word-break: break-all; }
 h2 { margin: 0; font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 p { margin: 0; }
 input, select, button, textarea { font: inherit; color: inherit; }
-input, select { background: var(--panel); border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px; min-width: 0; }
+input, select { background: var(--t-well); border: 1px solid var(--t-border); border-radius: var(--r-sm); padding: 6px 8px; min-width: 0; }
 input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--water); outline-offset: 2px; }
 input[type=range] { padding: 0; accent-color: var(--water); border: 0; background: none; }
@@ -39,10 +32,13 @@ label.toggle { flex-direction: row; align-items: center; gap: 6px; color: var(--
 fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
 legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 4px; }
 .checks-row { flex-direction: row; flex-wrap: wrap; gap: 14px; }
-.btn { border: 1px solid var(--rule); background: var(--panel); border-radius: 5px; padding: 6px 12px; cursor: pointer; font-weight: 500; }
-.btn:hover { border-color: var(--ink-2); }
-.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.btn.primary:hover { background: var(--ink-2); }
+.btn { border: 1px solid var(--t-btn-border); border-bottom-color: color-mix(in srgb, var(--t-btn-border) 60%, #000);
+  background: var(--t-btn); border-radius: var(--r-sm); padding: 6px 12px; cursor: pointer; font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); transition: border-color .12s, background .12s; }
+.btn:hover { background: var(--t-btn-hover); border-color: var(--t-border-hi); }
+.btn:active { box-shadow: inset 0 1px 2px rgba(0,0,0,.4); transform: translateY(1px); }
+.btn.primary { background: var(--t-accent); border-color: var(--t-accent); color: #1f1504; font-weight: 600; }
+.btn.primary:hover { background: color-mix(in srgb, var(--t-accent) 85%, #fff); }
 .btn.danger { color: var(--alert); }
 .btn.small { padding: 4px 10px; font-size: 14px; }
 .btn:disabled { opacity: .5; cursor: progress; }
@@ -78,9 +74,11 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 /* ---------- layout ---------- */
 .app { height: 100%; display: grid; grid-template: "top top" 50px "side map" 1fr "time time" auto / 340px 1fr; }
 .app.noside { grid-template-columns: 0 1fr; } .app.noside .side { display: none; }
-.topbar { grid-area: top; display: flex; align-items: center; gap: 12px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--rule); z-index: 1001; }
+.topbar { grid-area: top; display: flex; align-items: center; gap: 12px; padding: 0 10px; z-index: 1001;
+  background: color-mix(in srgb, var(--t-panel) 70%, var(--t-bg)); border-bottom: 1px solid #0d0f10; box-shadow: inset 0 -1px 0 var(--t-border); }
+.topbar .rig-apps { align-self: stretch; }
 .search { position: relative; flex: 1; max-width: 560px; }
-.search input { width: 100%; padding: 7px 10px 7px 32px; border-radius: 99px; background: var(--paper); }
+.search input { width: 100%; padding: 7px 10px 7px 32px; border-radius: 99px; background: var(--t-well); }
 .search-ico { position: absolute; left: 10px; top: 50%; translate: 0 -50%; width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 2; }
 .search-results { position: absolute; top: 40px; left: 0; right: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; box-shadow: var(--lift); max-height: 60vh; overflow: auto; }
 .search-results .sr { padding: 8px 12px; cursor: pointer; display: flex; gap: 10px; align-items: baseline; }
@@ -97,7 +95,8 @@ details.panel[open] > summary h2::after { transform: rotate(45deg); }
 .sheet-handle { display: none; }
 .tabs { display: flex; border-bottom: 1px solid var(--rule); padding: 0 8px; gap: 2px; overflow-x: auto; }
 .tabs button { background: none; border: 0; padding: 11px 9px 9px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 600; font-size: 15px; }
-.tabs button[aria-selected=true] { color: var(--ink); border-color: var(--ink); }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected=true] { color: var(--t-accent); border-color: var(--t-accent); }
 .tab-body { padding: 12px 14px; overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 
 /* ---------- people ---------- */

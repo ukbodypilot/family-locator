@@ -4,6 +4,10 @@
 
 port = 8790
 
+# Optional "Apps" menu in the top bar, linking to your other apps (leave out for none):
+# apps = [{ name = "Radio gateway", url = "http://192.0.2.10:8080/" },
+#         { name = "Tesla", url = "http://192.0.2.10:9877/" }]
+
 [tracking]
 poll_seconds = 60         # (UI) read the positions Apple already has, this often
 session_renew_minutes = 5   # (UI) fresh Find My session this often; family positions refresh per session

@@ -74,6 +74,9 @@ class Config:
     nominatim_url: str = "https://nominatim.openstreetmap.org"
     thunderforest_key: str = ""  # optional; enables the "Transport (Thunderforest)" base map
 
+    # Optional "Apps" menu in the top bar linking to your other apps: [{name, url}] (empty = no menu)
+    apps: list = field(default_factory=list)
+
     extra: dict = field(default_factory=dict)
 
 

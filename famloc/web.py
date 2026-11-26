@@ -85,7 +85,7 @@ def render_page(viewer: bool = False) -> HTMLResponse:
     # Version the app's own JS/CSS URLs by file mtime so a browser can never pair a new page with a
     # stale cached script.
     html = (STATIC / "index.html").read_text()
-    for f in ("app.js", "app.css"):
+    for f in ("app.js", "app.css", "rig.css", "rig-apps.js"):
         html = html.replace(f"static/{f}\"", f"static/{f}?v={int((STATIC / f).stat().st_mtime)}\"")
     if not viewer:
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
@@ -405,7 +405,7 @@ def create_app(cfg, icloud, airtag, photos, alerter, tesla=None) -> FastAPI:
                 "tesla": tesla.status() if tesla else None,
                 "family_requests": icloud.tracker.family_status(time.time()),
                 "photos": photos.status(), "backup": db.get_setting("last_backup"),
-                "links": {"public": public_url(cfg), "lan": lan_url(cfg)},
+                "links": {"public": public_url(cfg), "lan": lan_url(cfg)}, "apps": cfg.apps,
                 "tile_keys": {"thunderforest": cfg.thunderforest_key or None},
                 "storage": {"db": str(db.DB_PATH), "points": db.q1("SELECT COUNT(*) AS n FROM points")["n"]}, "email": {"configured": alerter.email_configured(),
                                                      "recipient": cfg.email_recipient, **ALERT_COUNTERS},

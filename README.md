@@ -4,7 +4,7 @@ Where everyone in the family is, where they've been, and an email when they arri
 Family Locator is a self-hosted app for an iCloud Family Sharing group. It keeps a history of Find
 My locations, shows people on a map and a per-person timeline, and sends alerts and a daily summary.
 
-![Family Locator in dark mode: people list, a day's drive coloured by speed, and the per-person timeline](docs/images/overview.png)
+![Family Locator: people list, a day's drive coloured by speed, and the per-person timeline](docs/images/overview.png)
 
 *Screenshots use made-up demo data.*
 

@@ -77,8 +77,8 @@ The layers button (top right) picks the base map and what's drawn on it.
 
 | Base map | Notes |
 |---|---|
-| Streets (OSM) | Default. Sharp to zoom 19. |
-| Dark streets (OSM) | Default in dark mode. Sharp to zoom 19. |
+| Streets (OSM) | Sharp to zoom 19. |
+| Dark streets (OSM) | Default (the page is dark). Sharp to zoom 19. |
 | Streets (Esri) | Sharp to zoom 19. |
 | Light grey, Dark grey | Quiet backgrounds. Real detail only to zoom 16, so they blur when you zoom in further. |
 | Satellite, Hybrid (satellite + labels) | Sharp to zoom 19. |

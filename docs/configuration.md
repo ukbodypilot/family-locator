@@ -17,6 +17,7 @@ inside any `[section]`; sections are only for readability.
 |---|---|---|
 | `host` | `0.0.0.0` | Address to listen on. |
 | `port` | `8790` | Port to listen on. |
+| `apps` | empty | Optional links for an "Apps" menu in the top bar, e.g. `apps = [{ name = "Tesla", url = "http://192.0.2.10:9877/" }]`. Empty = no menu. Hidden when the page is shown inside another app's frame. |
 | `public_url` | blank | Fixed outside link for emails. Blank uses the gateway's Cloudflare quick tunnel. |
 | `tunnel_metrics_url` | `http://127.0.0.1:20241/quicktunnel` | Where cloudflared reports its quick-tunnel address. |
 | `proxy_prefix` | `/family/` | The path the radio gateway forwards to this app. Used to build outside links. |

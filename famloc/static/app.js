@@ -202,9 +202,9 @@ const BASES = {
   "Humanitarian": L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 19, attribution: osmAttr + " | Humanitarian OSM Team" }),
   "Public transport (ÖPNVKarte)": L.tileLayer("https://tileserver.memomaps.de/tilegen/{z}/{x}/{y}.png", { maxZoom: MAXZ, maxNativeZoom: 18, attribution: 'Map <a href="https://memomaps.de/">memomaps.de</a> CC-BY-SA, ' + osmAttr }),
 };
-const darkPref = matchMedia("(prefers-color-scheme: dark)").matches;
-let baseName = store.get("base", darkPref ? "Dark streets (OSM)" : "Streets (OSM)");
-if (!BASES[baseName]) baseName = darkPref ? "Dark streets (OSM)" : "Streets (OSM)";
+// the page is dark only (rig house style), so the dark base map is the default
+let baseName = store.get("base", "Dark streets (OSM)");
+if (!BASES[baseName]) baseName = "Dark streets (OSM)";
 BASES[baseName].addTo(map);
 
 const L_people = L.layerGroup().addTo(map);
@@ -1455,6 +1455,7 @@ const stateWord = (s) => ({ ok: "connected", need_2fa: "waiting for code", need_
 async function loadStatus() {
   if (S.viewer) return {};
   const st = await api("/api/status");
+  if (!S.appsDone) { S.appsDone = true; if (window.RigApps) RigApps.render(st.apps, "Family Locator"); }
   const ic = st.icloud, at = st.airtag;
   $("#chips").innerHTML = [["iCloud", ic.state], ["AirTags", at.state], ["Email", st.email.configured ? "ok" : "off"]]
     .map(([n, s]) => `<button class="chip ${stateBadge(s)}" onclick="openTab('setup')" title="${esc(n)}: ${esc(stateWord(s))}"><i></i>${n}</button>`).join("");

@@ -2,6 +2,17 @@
 
 All notable changes to Family Locator. The version is the git tag.
 
+## [Unreleased]
+
+- **One look with its sibling apps.** The page now uses `rig.css`, the "rig front panel" house style
+  shared with radio-gateway, tesla-tools and lan-inventory (vendored in `famloc/static/`): graphite
+  panels, amber for the live and selected things, raised keys for buttons, recessed inputs. Place
+  names keep their serif italic. **Dark only**: the light theme is gone, and the dark street map is the
+  default base map. Docs screenshots retaken.
+- **Apps menu.** `apps = [{ name = "…", url = "…" }]` in `config.toml` adds an "Apps" menu to the top
+  bar linking your other apps. Empty (the default) = no menu; hidden when the page is shown inside
+  another app's frame.
+
 ## [2.0.1] -- 2026-11-24
 
 - **Copy buttons work on the home address.** Browsers only allow the clipboard on https pages, so
