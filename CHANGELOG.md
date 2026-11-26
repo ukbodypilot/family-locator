@@ -4,6 +4,8 @@ All notable changes to Family Locator. The version is the git tag.
 
 ## [Unreleased]
 
+## [2.1.0] -- 2026-11-26
+
 - **One look with its sibling apps.** The page now uses `rig.css`, the "rig front panel" house style
   shared with radio-gateway, tesla-tools and lan-inventory (vendored in `famloc/static/`): graphite
   panels, amber for the live and selected things, raised keys for buttons, recessed inputs. Place
