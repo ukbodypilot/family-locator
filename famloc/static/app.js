@@ -552,8 +552,8 @@ async function loadPoints() {
   const res = await api(`/api/points?start=${S.start}&end=${S.end}`, { timeout: 120000 });   // 1y / All can be big
   S.data = res.points; dropSpikes();
   buildMoves();
-  if (res.truncated) toast("This range has more than 200,000 fixes, so only the first 200,000 are shown. Choose a shorter range.", 6000);
-  computeRuns(); drawLanes(); buildPhotos(); render(true);
+  if (res.truncated) toast(`This range has ${res.total.toLocaleString()} fixes, so the tracks are thinned evenly to about 200,000. Choose a shorter range for every fix.`, 6000);
+  computeRuns(); drawLanes(); buildPhotos(); syncSliders(); render(true);
   if (S.firstFit) { S.firstFit = false; requestAnimationFrame(() => { map.invalidateSize(); fitAll(); }); }
   if (!$("#tab-insights").classList.contains("hidden")) loadInsights();
 }
@@ -1577,7 +1577,8 @@ async function refreshAll() {
   S.lastRefresh = now();   // only once it all worked, so the banner can tell a failing refresh
 }
 /* playback speed and trail: continuous sliders on a log scale (0-1000).
-   Speed 1 s/s (real time) .. 1 h/s; trail 15 min .. 7 days, with the far right end (>= 970) = whole track. */
+   Speed 1 s/s (real time) .. 1 h/s; trail 15 min .. 7 days, with the far right end (>= 970) = the whole
+   loaded range. Dragging the trail into that end also switches the range to All, so "max" means all time. */
 const SPEED_MIN = 1, SPEED_MAX = 3600, TRAIL_MIN = 900, TRAIL_MAX = 7 * 86400, TRAIL_WHOLE = 970;
 const logPos = (v, lo, hi) => lo * Math.pow(hi / lo, v);
 function niceSpan(sec) {
@@ -1591,7 +1592,7 @@ function speedSec() { return logPos(Number($("#speed").value) / 1000, SPEED_MIN,
 function trailSec() { const v = Number($("#trail").value); return v >= TRAIL_WHOLE ? 0 : logPos(v / TRAIL_WHOLE, TRAIL_MIN, TRAIL_MAX); }
 function syncSliders() {
   const sp = niceSpan(speedSec()).replace(/ hours?$/, " h")+ "/s";
-  const tr = trailSec() ? niceSpan(trailSec()) : "Whole track";
+  const tr = trailSec() ? niceSpan(trailSec()) : S.preset === "all" ? "All time" : S.end > S.start ? `Whole range (${niceSpan(S.end - S.start)})` : "Whole range";
   for (const [id, label] of [["speed", sp], ["trail", tr]]) {
     const el = $("#" + id);
     $("#" + id + "Out").textContent = label; el.setAttribute("aria-valuetext", label);
@@ -1600,7 +1601,13 @@ function syncSliders() {
 }
 $("#speed").value = store.get("speedPos2", 781); $("#trail").value = store.get("trailPos", 1000); syncSliders();
 $("#speed").oninput = () => { store.set("speedPos2", Number($("#speed").value)); syncSliders(); };
+let trailWas = Number($("#trail").value);
 $("#trail").oninput = () => { store.set("trailPos", Number($("#trail").value)); syncSliders(); schedRender(); };
+$("#trail").onchange = () => {   // on release, not while dragging: loading All can take a moment
+  const v = Number($("#trail").value), into = v >= TRAIL_WHOLE && trailWas < TRAIL_WHOLE;
+  trailWas = v;
+  if (into && S.preset !== "all") { stopPlay(); setPreset("all"); }
+};
 
 function handleHash(initial = false) {
   const h = decodeURIComponent(location.hash.slice(1));

@@ -311,13 +311,25 @@ def create_app(cfg, icloud, airtag, photos, alerter, tesla=None) -> FastAPI:
         if max_acc:
             sql += " AND (acc IS NULL OR acc<=?)"
             args.append(max_acc)
-        rows = db.q(sql + " ORDER BY ts LIMIT ?", args + [limit])
+        total = db.q1(sql.replace("device_id,ts,lat,lon,acc,alt,battery,kind,meta", "COUNT(*) AS n", 1), args)["n"]
+        thinned = total > limit
+        if thinned:
+            # Too many fixes: thin each device's track evenly across the whole range instead of cutting
+            # it off at a row limit (which used to drop the NEWEST fixes). Each device keeps its first
+            # and last fix, and photos are never dropped.
+            step = -(-total // limit)
+            sql = ("SELECT device_id,ts,lat,lon,acc,alt,battery,kind,meta FROM ("
+                   "SELECT *, ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY ts) AS rn, "
+                   "COUNT(*) OVER (PARTITION BY device_id) AS cnt FROM (" + sql + ")) "
+                   "WHERE (rn - 1) % ? = 0 OR rn = cnt OR kind = 'photo'")
+            args = args + [step]
+        rows = db.q(sql + " ORDER BY ts", args)
         out: dict[str, list] = {}
         for r in rows:  # compact columnar-ish form: [ts, lat, lon, acc, battery, kind, meta]
             out.setdefault(r["device_id"], []).append(
                 [r["ts"], round(r["lat"], 6), round(r["lon"], 6), r["acc"], r["battery"], r["kind"],
                  json.loads(r["meta"]) if r["meta"] else None])
-        return {"start": start, "end": end, "truncated": len(rows) >= limit, "points": out}
+        return {"start": start, "end": end, "truncated": thinned, "total": total, "points": out}
 
     @app.get("/api/range")
     def data_range(request: Request):

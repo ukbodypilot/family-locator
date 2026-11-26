@@ -809,8 +809,33 @@ def test_every_person_gets_their_own_page():
     assert not db.q1("SELECT id FROM viewers WHERE auto_owner='Pat'"), "a deleted automatic page stays deleted"
     db.set_setting("person_pages_off", [])
 
+
+
+
+def test_points_over_limit_are_thinned_not_cut_off():
+    c, web = _client()
+    _main_login(c)
+    db.upsert_device("icloud:thin_a", "icloud", "A")
+    db.upsert_device("icloud:thin_b", "icloud", "B")
+    for i in range(100):
+        db.add_point("icloud:thin_a", 10_000 + i * 10, 1.0, 1.0 + i * 1e-4, acc=10)
+        if i % 2:
+            db.add_point("icloud:thin_b", 10_000 + i * 10 + 1, 2.0, 2.0 + i * 1e-4, acc=10)
+    db.add_point("icloud:thin_b", 10_500, 2.0, 2.0, acc=10, kind="photo")
+    q = {"start": 10_000, "end": 11_000, "devices": "icloud:thin_a,icloud:thin_b"}
+    full = c.get("api/points", params=q).json()
+    assert not full["truncated"] and full["total"] == 151
+    r = c.get("api/points", params={**q, "limit": 50}).json()
+    assert r["truncated"] and r["total"] == 151
+    a, b = r["points"]["icloud:thin_a"], r["points"]["icloud:thin_b"]
+    # both ends of the range survive for every device (the old LIMIT dropped the newest fixes)
+    assert a[0][0] == 10_000 and a[-1][0] == 10_990
+    assert b[-1][0] == full["points"]["icloud:thin_b"][-1][0]
+    assert any(p[5] == "photo" for p in b), "photos are never thinned away"
+    assert len(a) + len(b) <= 60
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):
             f(); print("ok", n)
-

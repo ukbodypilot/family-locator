@@ -4,6 +4,13 @@ All notable changes to Family Locator. The version is the git tag.
 
 ## [Unreleased]
 
+- **Trail at max now means all time.** Dragging the Trail slider to the far right switches the range
+  to All, and the label says what it shows: "All time", or "Whole range (7 days)" after you pick a
+  shorter range. It used to say "Whole track" but only showed the current range (24 hours by default).
+- **Long ranges are thinned, not cut off.** Over 200,000 fixes, `/api/points` used to return the
+  oldest 200,000, so the newest tracks went missing. It now thins every device evenly across the
+  range, keeping each device's first and last fix and every photo, and reports `total`.
+
 ## [2.1.0] -- 2026-11-26
 
 - **One look with its sibling apps.** The page now uses `rig.css`, the "rig front panel" house style

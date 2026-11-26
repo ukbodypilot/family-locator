@@ -133,8 +133,15 @@ deleted. Alerts are careful too: a rough fix alone never sends an "arrived" or "
   you're viewing the past, the automatic refresh leaves you where you are.
 - **Playback.** Press play to animate. The **Speed** slider sets how much time passes per second,
   anywhere from 1 second (real time) to 1 hour. The **Trail** slider sets how much track shows behind the
-  cursor, anywhere from 15 minutes to 7 days, or the whole track at the far right. Both are
-  continuous on a log scale, so the short end has as much room as the long end. Both are remembered in your browser.
+  cursor, anywhere from 15 minutes to 7 days. At the far right it shows the whole of the range you
+  picked ("Whole range (7 days)"). Dragging it to the far right also switches the range to **All**,
+  so the map shows every track you have ("All time"); pick a shorter range afterwards to keep the
+  whole-range trail for just that range. Tracks are drawn up to the cursor, so drag it to the right end
+  to see the newest part. Both sliders are continuous on a log scale, so the short end has as much room
+  as the long end. Both are remembered in your browser.
+- **Very long ranges.** If a range holds more than 200,000 fixes, each track is thinned evenly across
+  the whole range (every track keeps its first and last fix, and photos are never dropped), and a note
+  says so. Choose a shorter range to see every fix.
 
 ## A new driver in the family
 
