@@ -4,6 +4,8 @@ All notable changes to Family Locator. The version is the git tag.
 
 ## [Unreleased]
 
+## [2.2.0] -- 2026-11-26
+
 - **Trail at max now means all time.** Dragging the Trail slider to the far right switches the range
   to All, and the label says what it shows: "All time", or "Whole range (7 days)" after you pick a
   shorter range. It used to say "Whole track" but only showed the current range (24 hours by default).
