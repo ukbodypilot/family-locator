@@ -20,6 +20,7 @@ class Config:
     public_url: str = ""  # fixed public link for emails; blank = discover the gateway's Cloudflare tunnel
     tunnel_metrics_url: str = "http://127.0.0.1:20241/quicktunnel"  # cloudflared reports its quick-tunnel host here
     proxy_prefix: str = "/family/"  # path the radio-gateway proxies to this app
+    short_links_file: str = ""  # radio-gateway TUNNEL_SHORT_LINKS file: adds its tinyurl link to emails
 
     # iCloud Find My polling
     poll_seconds: int = 60   # read Apple's stored positions this often (Apple's web client checks back at least every 60 s)

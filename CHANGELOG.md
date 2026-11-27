@@ -4,6 +4,10 @@ All notable changes to Family Locator. The version is the git tag.
 
 ## [Unreleased]
 
+- **Short link in emails** (`short_links_file`): the radio gateway's short tunnel link to this page,
+  shown only while it points at the tunnel cloudflared reports now. User-page links carry a secret
+  token and are never shortened.
+
 ## [2.2.0] -- 2026-11-26
 
 - **Trail at max now means all time.** Dragging the Trail slider to the far right switches the range

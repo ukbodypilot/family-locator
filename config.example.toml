@@ -29,6 +29,9 @@ thunderforest_key = ""  # optional, free at thunderforest.com: adds the Thunderf
 # whose address is read from cloudflared each time.
 public_url = ""
 proxy_prefix = "/family/"
+# With the radio gateway's TUNNEL_SHORT_LINKS on, emails also carry its short link
+# (tinyurl.com/...) to this page, remade whenever the tunnel changes:
+# short_links_file = "/tmp/cloudflare_tunnel_short.json"
 
 [email]
 # Gmail address + an app password (https://myaccount.google.com/apppasswords).

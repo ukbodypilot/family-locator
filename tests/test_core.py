@@ -839,3 +839,22 @@ if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):
             f(); print("ok", n)
+
+
+def test_short_link_only_while_it_matches_the_tunnel():
+    from famloc import alerts
+    cfg = config.Config()
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "short.json")
+    cfg.short_links_file = p
+    cfg.public_url = "https://now-tunnel.trycloudflare.com/family/"
+    json.dump({"tunnel": "https://now-tunnel.trycloudflare.com",
+               "links": {"/": "https://tinyurl.com/a", "/family/": "https://tinyurl.com/f"}}, open(p, "w"))
+    assert "Short link (type it in): https://tinyurl.com/f" in alerts.links(cfg)
+    json.dump({"tunnel": "https://old-tunnel.trycloudflare.com",
+               "links": {"/family/": "https://tinyurl.com/old"}}, open(p, "w"))
+    assert "tinyurl" not in alerts.links(cfg)          # stale file: dead hostname
+    os.unlink(p)
+    assert "tinyurl" not in alerts.links(cfg)          # no file: no line, no error
+    cfg.short_links_file = ""
+    assert "tinyurl" not in alerts.links(cfg)

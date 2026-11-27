@@ -77,6 +77,24 @@ def viewer_links(cfg: Config, v: dict, fragment: str = "") -> str:
     return f"Open: {link}" if link else "The link isn't available right now; tomorrow's email will have a fresh one."
 
 
+def short_link(cfg: Config, pub: str | None) -> str | None:
+    """The radio gateway's short link to this page (short_links_file), only while it points at the
+    tunnel we see now: after a tunnel change the gateway rewrites the file, and until then the old
+    link would lead to a dead hostname. User pages never get one: their links carry a secret token."""
+    if not (cfg.short_links_file and pub):
+        return None
+    try:
+        with open(cfg.short_links_file) as f:
+            d = json.load(f)
+        tunnel = str(d.get("tunnel") or "").rstrip("/")
+        link = (d.get("links") or {}).get(cfg.proxy_prefix)
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not tunnel or not pub.startswith(tunnel + "/"):
+        return None
+    return link if isinstance(link, str) and link.startswith("https://") else None
+
+
 def links(cfg: Config, fragment: str = "") -> str:
     """Footer lines for emails: the anywhere link (via the gateway's tunnel) and the home-Wi-Fi link."""
     frag = f"#{fragment}" if fragment else ""
@@ -84,6 +102,9 @@ def links(cfg: Config, fragment: str = "") -> str:
     pub = public_url(cfg)
     if pub:
         out.append(f"Open (phone, anywhere): {pub}{frag}")
+        short = short_link(cfg, pub)
+        if short:
+            out.append(f"Short link (type it in): {short}")
     out.append(f"Open (home Wi-Fi): {lan_url(cfg)}{frag}")
     return "\n".join(out)
 
