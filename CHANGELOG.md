@@ -4,6 +4,8 @@ All notable changes to Family Locator. The version is the git tag.
 
 ## [Unreleased]
 
+## [2.3.0] -- 2026-11-28
+
 - **Fixes slider** (fix confidence) next to Speed and Trail: how accurate a fix must be to join the
   track line, 5 m to 2 km on a log scale, "All fixes" at the far right, default 50 m (as before).
   Fixes left out still show as rings. It also sets the speeds on the cards, markers and speed-coloured
