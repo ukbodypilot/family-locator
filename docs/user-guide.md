@@ -139,6 +139,13 @@ deleted. Alerts are careful too: a rough fix alone never sends an "arrived" or "
   whole-range trail for just that range. Tracks are drawn up to the cursor, so drag it to the right end
   to see the newest part. Both sliders are continuous on a log scale, so the short end has as much room
   as the long end. Both are remembered in your browser.
+- **Fix confidence.** The **Fixes** slider next to them sets how accurate a fix has to be to join
+  the track line: from "Within 5 m" (GPS only) to "Within 2 km", and "All fixes" at the far right.
+  The default is 50 m. Fixes that don't make the cut show as small rings instead, so you can still
+  see them and click them. Tighten it to drop wobbly Wi-Fi and cell-tower guesses from a drive;
+  loosen it to join up a trip that only had rough fixes (a train in tunnels, say). Double-click the
+  slider to go back to 50 m. It only changes the drawing in your browser: speeds on the cards and
+  place alerts are not affected.
 - **Very long ranges.** If a range holds more than 200,000 fixes, each track is thinned evenly across
   the whole range (every track keeps its first and last fix, and photos are never dropped), and a note
   says so. Choose a shorter range to see every fix.

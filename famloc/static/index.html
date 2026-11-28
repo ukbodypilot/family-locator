@@ -293,6 +293,11 @@
         <input type="range" id="trail" min="0" max="1000" step="1" value="1000" aria-label="Trail length">
         <output id="trailOut" for="trail"></output>
       </label>
+      <label class="tb-slider" title="Fix confidence: only fixes at least this accurate join the track line. Less accurate ones show as small rings">
+        <span class="tb-slider-name">Fixes</span>
+        <input type="range" id="conf" min="0" max="1000" step="1" value="500" aria-label="Fix accuracy needed to join the track">
+        <output id="confOut" for="conf"></output>
+      </label>
     </div>
     <div class="lanes" id="lanes">
       <div class="lane-names" id="laneNames"></div>

@@ -784,11 +784,11 @@ function render(full = false) {
   scrub.value = Math.round(((S.t - S.start) / span) * 1000);
   scrub.setAttribute("aria-valuetext", dt(S.t));
   updateBanner();
-  const trail = trailSec(), from = trail ? Math.max(S.start, S.t - trail) : S.start;
+  const trail = trailSec(), from = trail ? Math.max(S.start, S.t - trail) : S.start, trackAcc = confAcc();
   L_tracks.clearLayers(); L_people.clearLayers(); L_acc.clearLayers(); L_points.clearLayers(); L_devices.clearLayers();
   const heat = [], wantDots = map.hasLayer(L_points), wantHeat = map.hasLayer(L_heat), wantDevs = map.hasLayer(L_devices);
 
-  /* The line joins only good fixes. A rough one (worse than ROUGH_ACC: Wi-Fi/cell-tower guesses) is
+  /* The line joins only good fixes. A rough one (worse than the Fixes slider, default ROUGH_ACC: Wi-Fi/cell-tower guesses) is
      shown as a small ring on its own instead of being joined in, so a scatter of rough fixes reads
      as points rather than spaghetti. Click either for the fix and its accuracy circle. */
   const drawTrack = (d, color, opts = {}) => {
@@ -801,7 +801,7 @@ function render(full = false) {
       const p = a[i];
       if (wantHeat) heat.push([p[1], p[2], 0.5]);
       if (wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1, fillOpacity: 0.7, renderer: dotsR }).on("click", (e) => { L.DomEvent.stop(e); selectFix(d, p); }).addTo(L_points);
-      if ((p[3] || 0) > ROUGH_ACC) {
+      if ((p[3] || 0) > trackAcc) {
         if (!wantDots) L.circleMarker([p[1], p[2]], { radius: 3, color, weight: 1.5, opacity: 0.8 * (opts.opacity || 1), fill: false, renderer: dotsR })
           .bindTooltip(`Rough fix, within ${Math.round(p[3])} m`).on("click", (e) => { L.DomEvent.stop(e); selectFix(d, p); }).addTo(L_tracks);
       } else good.push(p);
@@ -1590,16 +1590,27 @@ function niceSpan(sec) {
 }
 function speedSec() { return logPos(Number($("#speed").value) / 1000, SPEED_MIN, SPEED_MAX); }
 function trailSec() { const v = Number($("#trail").value); return v >= TRAIL_WHOLE ? 0 : logPos(v / TRAIL_WHOLE, TRAIL_MIN, TRAIL_MAX); }
+/* Fixes (confidence) slider: the accuracy a fix needs to join the track line, 5 m .. 2 km on a log
+   scale, far right (>= CONF_ANY) = every fix whatever its accuracy. Default = ROUGH_ACC (50 m).
+   Page-only: rings, the dots layer, speeds on the cards and the server's alerts don't change. */
+const CONF_MIN = 5, CONF_MAX = 2000, CONF_ANY = 970;
+const confPosOf = (m) => Math.round(Math.log(m / CONF_MIN) / Math.log(CONF_MAX / CONF_MIN) * CONF_ANY);
+function confAcc() { const v = Number($("#conf").value); return v >= CONF_ANY ? Infinity : logPos(v / CONF_ANY, CONF_MIN, CONF_MAX); }
+const niceM = (m) => m >= 1000 ? `${Math.round(m / 100) / 10} km` : `${m < 20 ? Math.round(m) : Math.round(m / 5) * 5} m`;
 function syncSliders() {
   const sp = niceSpan(speedSec()).replace(/ hours?$/, " h")+ "/s";
   const tr = trailSec() ? niceSpan(trailSec()) : S.preset === "all" ? "All time" : S.end > S.start ? `Whole range (${niceSpan(S.end - S.start)})` : "Whole range";
-  for (const [id, label] of [["speed", sp], ["trail", tr]]) {
+  const ca = confAcc(), cf = ca === Infinity ? "All fixes" : `Within ${niceM(ca)}`;
+  for (const [id, label] of [["speed", sp], ["trail", tr], ["conf", cf]]) {
     const el = $("#" + id);
     $("#" + id + "Out").textContent = label; el.setAttribute("aria-valuetext", label);
     el.style.setProperty("--fill", Number(el.value) / 10 + "%");
   }
 }
-$("#speed").value = store.get("speedPos2", 781); $("#trail").value = store.get("trailPos", 1000); syncSliders();
+$("#speed").value = store.get("speedPos2", 781); $("#trail").value = store.get("trailPos", 1000);
+$("#conf").value = store.get("confPos", confPosOf(ROUGH_ACC)); syncSliders();
+$("#conf").oninput = () => { store.set("confPos", Number($("#conf").value)); syncSliders(); schedRender(); };
+$("#conf").ondblclick = () => { $("#conf").value = confPosOf(ROUGH_ACC); $("#conf").oninput(); };   // back to the default
 $("#speed").oninput = () => { store.set("speedPos2", Number($("#speed").value)); syncSliders(); };
 let trailWas = Number($("#trail").value);
 $("#trail").oninput = () => { store.set("trailPos", Number($("#trail").value)); syncSliders(); schedRender(); };
