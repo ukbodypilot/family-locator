@@ -298,6 +298,11 @@
         <input type="range" id="conf" min="0" max="1000" step="1" value="500" aria-label="Fix accuracy needed to join the track">
         <output id="confOut" for="conf"></output>
       </label>
+      <label class="tb-slider" title="Path confidence: leave out a fix that adds more than this much extra distance to the path between the fixes either side of it (a one-off jump), whatever accuracy it claims">
+        <span class="tb-slider-name">Path</span>
+        <input type="range" id="path" min="0" max="1000" step="1" value="1000" aria-label="Largest one-fix detour to keep">
+        <output id="pathOut" for="path"></output>
+      </label>
     </div>
     <div class="lanes" id="lanes">
       <div class="lane-names" id="laneNames"></div>

@@ -9,6 +9,10 @@ All notable changes to Family Locator. The version is the git tag.
   Fixes left out still show as rings. It also sets the speeds on the cards, markers and speed-coloured
   tracks, and the rough-jump filter (never stricter than 50 m; "All fixes" turns it off). Remembered
   per browser; double-click resets. Page only.
+- **Path slider** (path confidence): leaves out a fix that adds more than the chosen extra distance
+  to the path between its neighbours (100 m to 5 km, default "Keep all"), whatever accuracy it claims.
+  Catches "5 m GPS" fixes that jump 1-2 km off a drive and back. Dropped fixes leave the track, the
+  position and the speeds; both sliders now redraw the map while dragging. Page only.
 - **Short link in emails** (`short_links_file`): the radio gateway's short tunnel link to this page,
   shown only while it points at the tunnel cloudflared reports now. User-page links carry a secret
   token and are never shortened.

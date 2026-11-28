@@ -149,6 +149,15 @@ deleted. Alerts are careful too: a rough fix alone never sends an "arrived" or "
   Because most phone fixes are 5-20 m GPS, tightening it often thins the line without changing its
   shape; it shows most on trips with rough fixes (trains, tunnels, abroad). It only changes your
   browser's view: place alerts are not affected.
+- **Path confidence.** Some fixes claim to be accurate (say "5 m, GPS") but sit a kilometre or two
+  off the route for a single fix and then snap back. The Fixes slider can't catch those, so the
+  **Path** slider judges each fix by the extra distance it adds to the path between the fixes either
+  side of it. "Keep all" at the far right (the default) leaves everything in; slide left to "Drop >
+  1 km", "Drop > 500 m" and so on, down to 100 m. On real drives almost every fix adds under 200 m,
+  while one-off jumps add 1-2 km, so around 1 km is a good setting. Left-out fixes vanish from the
+  track and the position (turn on "Every fix as a dot" to see them as dashed grey rings). A real
+  detour with only one fix at its far end looks just like a jump, so very strict settings can cut a
+  quick there-and-back trip. Double-click resets it. Both sliders redraw the map as you drag.
 - **Very long ranges.** If a range holds more than 200,000 fixes, each track is thinned evenly across
   the whole range (every track keeps its first and last fix, and photos are never dropped), and a note
   says so. Choose a shorter range to see every fix.

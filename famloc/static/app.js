@@ -319,35 +319,52 @@ const lastOf = (d) => (d.last ? [d.last.ts, d.last.lat, d.last.lon, d.last.acc, 
 /* Times each device clearly moved (consecutive own fixes > 250 m apart, beyond their accuracy),
    rebuilt when data loads. Used to tell which device is with the person when they disagree. */
 let MOVES = {};
-/* Outliers: a fix is left out (soft: only in this page, nothing is deleted) when it is BOTH rough
-   (worse than SPIKE_ACC) AND an out-and-back jump: more than SPIKE_MIN_M from the last kept fix and
-   from the next good fix, while those two agree with each other, all within 15 minutes. Measured on a
-   week of real fixes: catches the 400-2,400 m cell-tower jumps but keeps the 30-65 m Wi-Fi/cell
-   fixes that make up ~40% of a drive. The newest fix is never judged (nothing after it yet).
-   Left-out fixes are kept in S.spikes for the "Every fix as a dot" layer.
-   The Fixes slider moves "rough" for this too, but never below SPIKE_ACC (tighter than that, fixes
-   are already off the line): at 200 m only jumps worse than 200 m go, at "All fixes" none do.
-   S.raw keeps the loaded fixes so this can be redone when the slider moves. */
+/* Outliers: fixes left out of the track AND the position (soft: only in this page, nothing is
+   deleted). Two independent rules, redone from S.raw whenever either slider moves:
+   1. Rough jump (Fixes slider): a fix worse than the spike accuracy AND an out-and-back jump: more
+      than SPIKE_MIN_M from the last kept fix and from the next good fix, while those two agree, all
+      within 15 minutes. Measured on a week of real fixes: catches the 400-2,400 m cell-tower jumps
+      but keeps the 30-65 m Wi-Fi/cell fixes that make up ~40% of a drive. The spike accuracy follows
+      the Fixes slider but never below SPIKE_ACC (tighter than that, fixes are already off the
+      line); at "All fixes" this rule is off.
+   2. Off the path (Path slider), whatever accuracy the fix claims: the extra distance the fix adds,
+      d(prev, fix) + d(fix, next) - d(prev, next), with prev = last kept good fix and next = next good
+      fix, within PATH_WINDOW. Over a week of real phone fixes: median 0, 99% under 190 m, 57 over
+      500 m (Apple fixes that say "5 m GPS" but sit 1-2 km off, e.g. a 2.2 km out-and-back).
+      Judged against the last KEPT fix, so the fix after a dropped jump isn't dropped too. A real
+      detour with only one fix at its far end looks the same: that's why it's a slider, default off.
+   The newest fix is never judged (nothing after it yet). Left-out fixes go to S.spikes (shown in the
+   "Every fix as a dot" layer as dashed grey rings). */
 const SPIKE_ACC = 50, SPIKE_MIN_M = 300, SPIKE_WINDOW = 15 * 60;   // real jumps measured: all back within 4 min
+const PATH_WINDOW = 15 * 60;
 const spikeAccNow = () => Math.max(SPIKE_ACC, confAcc());
 function dropSpikes() {
-  S.spikes = {}; S.data = { ...S.raw }; S.spikeAcc = spikeAccNow();
-  if (S.spikeAcc === Infinity) return;
-  const SPIKE_ACC = S.spikeAcc;
+  S.spikes = {}; S.data = { ...S.raw || {} };
+  const spikeAcc = S.spikeAcc = spikeAccNow(), tol = S.pathTol = pathTol(), goodAcc = confAcc();
+  if (spikeAcc === Infinity && tol === Infinity) return;
+  const good = (q) => (q[3] || 0) <= goodAcc;
   for (const [id, a] of Object.entries(S.data)) {
     if (a.length < 3) continue;
     const kept = [], out = [];
+    let prevGood = null;
     for (let i = 0; i < a.length; i++) {
       const p = a[i], prev = kept[kept.length - 1];
-      if (prev && (p[3] || 0) > SPIKE_ACC) {
+      if (prev && spikeAcc !== Infinity && (p[3] || 0) > spikeAcc) {
         let next = null;
-        for (let j = i + 1; j < a.length && a[j][0] - prev[0] <= SPIKE_WINDOW; j++) if ((a[j][3] || 0) <= SPIKE_ACC) { next = a[j]; break; }
+        for (let j = i + 1; j < a.length && a[j][0] - prev[0] <= SPIKE_WINDOW; j++) if ((a[j][3] || 0) <= spikeAcc) { next = a[j]; break; }
         if (next) {
           const d1 = haversine(prev[1], prev[2], p[1], p[2]), d2 = haversine(p[1], p[2], next[1], next[2]);
           if (Math.min(d1, d2) > SPIKE_MIN_M && haversine(prev[1], prev[2], next[1], next[2]) < 0.3 * Math.min(d1, d2)) { out.push(p); continue; }
         }
       }
+      if (prevGood && tol !== Infinity) {
+        let next = null;
+        for (let j = i + 1; j < a.length && a[j][0] - prevGood[0] <= PATH_WINDOW; j++) if (good(a[j])) { next = a[j]; break; }
+        if (next && haversine(prevGood[1], prevGood[2], p[1], p[2]) + haversine(p[1], p[2], next[1], next[2])
+                    - haversine(prevGood[1], prevGood[2], next[1], next[2]) > tol) { out.push(p); continue; }
+      }
       kept.push(p);
+      if (good(p)) prevGood = p;
     }
     if (out.length) { S.data[id] = kept; S.spikes[id] = out; }
   }
@@ -961,7 +978,7 @@ function selectFix(d, p, outlier = false) {
   if (acc) L.circle(ll, { radius: acc, color: "#e8a33d", weight: 2, dashArray: "5 4", fillColor: "#e8a33d", fillOpacity: 0.15, interactive: false, pane: "selPane", renderer: selR }).addTo(L_sel);
   L.circleMarker(ll, { radius: 5, color: "#e8a33d", weight: 2.5, fillColor: "#fff", fillOpacity: 1, interactive: false, pane: "selPane", renderer: selR }).addTo(L_sel);
   const el = fixPopup(d, p);
-  if (outlier) el.insertAdjacentHTML("afterbegin", '<p class="muted small" style="margin:0 0 6px">Left out of the track and position: a rough fix far from the fixes either side of it.</p>');
+  if (outlier) el.insertAdjacentHTML("afterbegin", '<p class="muted small" style="margin:0 0 6px">Left out of the track and position: it does not fit the fixes either side of it (Fixes / Path sliders).</p>');
   const pop = L.popup({ autoPan: false, offset: [0, -4] }).setLatLng(ll).setContent(el);
   pop.on("remove", () => { if (L_sel._pop === pop) { L_sel.clearLayers(); L_sel._pop = null; } });
   L_sel._pop = pop; pop.openOn(map);
@@ -1603,6 +1620,10 @@ function trailSec() { const v = Number($("#trail").value); return v >= TRAIL_WHO
    Also used for the speeds on the cards/markers and the jump filter (dropSpikes). Page-only: the
    server's alerts don't change. */
 const CONF_MIN = 5, CONF_MAX = 2000, CONF_ANY = 970;
+/* Path slider: how much extra distance one fix may add to the path before it's left out (see
+   dropSpikes). 100 m (strict) .. 5 km on a log scale; far right (>= PATH_OFF) = off, the default. */
+const PATH_MIN = 100, PATH_MAX = 5000, PATH_OFF = 970;
+function pathTol() { const el = $("#path"); const v = el ? Number(el.value) : 1000; return v >= PATH_OFF ? Infinity : logPos(v / PATH_OFF, PATH_MIN, PATH_MAX); }
 const confPosOf = (m) => Math.round(Math.log(m / CONF_MIN) / Math.log(CONF_MAX / CONF_MIN) * CONF_ANY);
 function confAcc() { const v = Number($("#conf").value); return v >= CONF_ANY ? Infinity : logPos(v / CONF_ANY, CONF_MIN, CONF_MAX); }
 const niceM = (m) => m >= 1000 ? `${Math.round(m / 100) / 10} km` : `${m < 20 ? Math.round(m) : Math.round(m / 5) * 5} m`;
@@ -1610,7 +1631,8 @@ function syncSliders() {
   const sp = niceSpan(speedSec()).replace(/ hours?$/, " h")+ "/s";
   const tr = trailSec() ? niceSpan(trailSec()) : S.preset === "all" ? "All time" : S.end > S.start ? `Whole range (${niceSpan(S.end - S.start)})` : "Whole range";
   const ca = confAcc(), cf = ca === Infinity ? "All fixes" : `Within ${niceM(ca)}`;
-  for (const [id, label] of [["speed", sp], ["trail", tr], ["conf", cf]]) {
+  const pt = pathTol(), pf = pt === Infinity ? "Keep all" : `Drop > ${niceM(pt)}`;
+  for (const [id, label] of [["speed", sp], ["trail", tr], ["conf", cf], ["path", pf]]) {
     const el = $("#" + id);
     $("#" + id + "Out").textContent = label; el.setAttribute("aria-valuetext", label);
     el.style.setProperty("--fill", Number(el.value) / 10 + "%");
@@ -1618,12 +1640,19 @@ function syncSliders() {
 }
 $("#speed").value = store.get("speedPos2", 781); $("#trail").value = store.get("trailPos", 1000);
 $("#conf").value = store.get("confPos", confPosOf(ROUGH_ACC)); syncSliders();
-$("#conf").oninput = () => { store.set("confPos", Number($("#conf").value)); syncSliders(); schedRender(); };
-$("#conf").onchange = () => {   // on release: redo the jump filter and what's built on it, if it moved
-  if (!S.raw || spikeAccNow() === S.spikeAcc) return;
-  dropSpikes(); buildMoves(); computeRuns(); drawLanes(); render();
-};
-$("#conf").ondblclick = () => { $("#conf").value = confPosOf(ROUGH_ACC); $("#conf").oninput(); $("#conf").onchange(); };   // back to the default
+/* Either slider: redo the outlier filter while dragging, so the map follows the thumb (cheap: one
+   pass over the fixes); the lanes are rebuilt on release. */
+function refilter() {
+  if (S.raw && (spikeAccNow() !== S.spikeAcc || pathTol() !== S.pathTol)) { dropSpikes(); buildMoves(); S.lanesStale = true; }
+  schedRender();
+}
+function refilterDone() { refilter(); if (S.lanesStale) { S.lanesStale = false; computeRuns(); drawLanes(); } }
+$("#path").value = store.get("pathPos", 1000); syncSliders();
+$("#conf").oninput = () => { store.set("confPos", Number($("#conf").value)); syncSliders(); refilter(); };
+$("#path").oninput = () => { store.set("pathPos", Number($("#path").value)); syncSliders(); refilter(); };
+$("#conf").onchange = $("#path").onchange = refilterDone;
+$("#conf").ondblclick = () => { $("#conf").value = confPosOf(ROUGH_ACC); $("#conf").oninput(); refilterDone(); };
+$("#path").ondblclick = () => { $("#path").value = 1000; $("#path").oninput(); refilterDone(); };   // back to the default
 $("#speed").oninput = () => { store.set("speedPos2", Number($("#speed").value)); syncSliders(); };
 let trailWas = Number($("#trail").value);
 $("#trail").oninput = () => { store.set("trailPos", Number($("#trail").value)); syncSliders(); schedRender(); };
