@@ -6,7 +6,9 @@ All notable changes to Family Locator. The version is the git tag.
 
 - **Fixes slider** (fix confidence) next to Speed and Trail: how accurate a fix must be to join the
   track line, 5 m to 2 km on a log scale, "All fixes" at the far right, default 50 m (as before).
-  Fixes left out still show as rings. Remembered per browser; double-click resets. Page only.
+  Fixes left out still show as rings. It also sets the speeds on the cards, markers and speed-coloured
+  tracks, and the rough-jump filter (never stricter than 50 m; "All fixes" turns it off). Remembered
+  per browser; double-click resets. Page only.
 - **Short link in emails** (`short_links_file`): the radio gateway's short tunnel link to this page,
   shown only while it points at the tunnel cloudflared reports now. User-page links carry a secret
   token and are never shortened.

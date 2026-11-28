@@ -144,8 +144,11 @@ deleted. Alerts are careful too: a rough fix alone never sends an "arrived" or "
   The default is 50 m. Fixes that don't make the cut show as small rings instead, so you can still
   see them and click them. Tighten it to drop wobbly Wi-Fi and cell-tower guesses from a drive;
   loosen it to join up a trip that only had rough fixes (a train in tunnels, say). Double-click the
-  slider to go back to 50 m. It only changes the drawing in your browser: speeds on the cards and
-  place alerts are not affected.
+  slider to go back to 50 m. The speeds on the cards and markers follow it too, and so does the
+  filter that hides rough out-and-back jumps: at "All fixes" every fix is drawn, jumps included.
+  Because most phone fixes are 5-20 m GPS, tightening it often thins the line without changing its
+  shape; it shows most on trips with rough fixes (trains, tunnels, abroad). It only changes your
+  browser's view: place alerts are not affected.
 - **Very long ranges.** If a range holds more than 200,000 fixes, each track is thinned evenly across
   the whole range (every track keeps its first and last fix, and photos are never dropped), and a note
   says so. Choose a shorter range to see every fix.

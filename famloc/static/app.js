@@ -324,10 +324,16 @@ let MOVES = {};
    from the next good fix, while those two agree with each other, all within 15 minutes. Measured on a
    week of real fixes: catches the 400-2,400 m cell-tower jumps but keeps the 30-65 m Wi-Fi/cell
    fixes that make up ~40% of a drive. The newest fix is never judged (nothing after it yet).
-   Left-out fixes are kept in S.spikes for the "Every fix as a dot" layer. */
+   Left-out fixes are kept in S.spikes for the "Every fix as a dot" layer.
+   The Fixes slider moves "rough" for this too, but never below SPIKE_ACC (tighter than that, fixes
+   are already off the line): at 200 m only jumps worse than 200 m go, at "All fixes" none do.
+   S.raw keeps the loaded fixes so this can be redone when the slider moves. */
 const SPIKE_ACC = 50, SPIKE_MIN_M = 300, SPIKE_WINDOW = 15 * 60;   // real jumps measured: all back within 4 min
+const spikeAccNow = () => Math.max(SPIKE_ACC, confAcc());
 function dropSpikes() {
-  S.spikes = {};
+  S.spikes = {}; S.data = { ...S.raw }; S.spikeAcc = spikeAccNow();
+  if (S.spikeAcc === Infinity) return;
+  const SPIKE_ACC = S.spikeAcc;
   for (const [id, a] of Object.entries(S.data)) {
     if (a.length < 3) continue;
     const kept = [], out = [];
@@ -403,17 +409,18 @@ function fenceAt(lat, lon) {
    they span 3 min, so 30-s follow fixes aren't all noise). Only from ONE device (mixing devices
    fakes jumps), only if the newest fix is recent, no gap > 35 min, and the net move clears
    250 m / the fixes' accuracy, so GPS jitter at rest never shows as a speed. Fixes worse than
-   ROUGH_ACC (50 m: Apple's cell/Wi-Fi guesses) are skipped for speed and the track line; they
-   still place people. */
+   the Fixes slider (default ROUGH_ACC, 50 m: Apple's cell/Wi-Fi guesses) are skipped for speed and
+   the track line; they still place people. */
 const ROUGH_ACC = 50;   // same as the server's rough_accuracy_m default
-const SPEED_MAX_ACC = ROUGH_ACC, SPEED_MIN_FIXES = 3, SPEED_MAX_FIXES = 6, SPEED_MIN_SPAN = 3 * 60, SPEED_FRESH = 15 * 60;
+const SPEED_MIN_FIXES = 3, SPEED_MAX_FIXES = 6, SPEED_MIN_SPAN = 3 * 60, SPEED_FRESH = 15 * 60;
 function avgSpeed(pos, t = S.t) {
   if (!pos) return null;
   const a = S.data[pos.dev.id] || [];
   const i = idxAt(a, pos.p[0]);
   let pts = i >= 0 ? a.slice(Math.max(0, i - SPEED_MAX_FIXES + 1), i + 1) : [];
   if (!pts.length || pts[pts.length - 1][0] < pos.p[0]) pts.push(pos.p);   // live fix not loaded yet
-  pts = pts.filter((q) => q[3] == null || q[3] <= SPEED_MAX_ACC);         // a 400-1600 m cell guess zig-zags the path
+  const maxAcc = confAcc();
+  pts = pts.filter((q) => q[3] == null || q[3] <= maxAcc);         // a 400-1600 m cell guess zig-zags the path
   const last = pts[pts.length - 1];
   if (!last || t - last[0] > SPEED_FRESH) return null;   // all recent fixes rough: no speed
   let k = pts.length - 1;                                  // walk back: 3 fixes, more until 3 min
@@ -550,7 +557,7 @@ async function loadFences() { S.fences = await api("/api/geofences"); renderPlac
 async function loadPoints() {
   $("#tFrom").value = toLocalInput(S.start); $("#tTo").value = toLocalInput(S.end);
   const res = await api(`/api/points?start=${S.start}&end=${S.end}`, { timeout: 120000 });   // 1y / All can be big
-  S.data = res.points; dropSpikes();
+  S.raw = res.points; dropSpikes();
   buildMoves();
   if (res.truncated) toast(`This range has ${res.total.toLocaleString()} fixes, so the tracks are thinned evenly to about 200,000. Choose a shorter range for every fix.`, 6000);
   computeRuns(); drawLanes(); buildPhotos(); syncSliders(); render(true);
@@ -710,7 +717,8 @@ const SPEED_COLORS = ["#7b3fd0", "#1e88e5", "#d4b000", "#f06400", "#b71c1c", "#d
 const SPEED_UNSURE = "#8a8a86", SPEED_SEG_GAP = 15 * 60;   // a longer hop is a straight line over a gap, not the path
 const darkTiles = () => /dark/i.test(curBase);
 function segSpeedBin(p0, p1) {
-  if ((p0[3] || 0) > SPEED_MAX_ACC || (p1[3] || 0) > SPEED_MAX_ACC) return -1;   // a cell-tower guess: no honest speed
+  const maxAcc = confAcc();   // the Fixes slider: worse than that is a cell-tower guess, no honest speed
+  if ((p0[3] || 0) > maxAcc || (p1[3] || 0) > maxAcc) return -1;
   const dt = p1[0] - p0[0]; if (dt <= 0) return -2;                             // same moment: inherit
   if (dt > SPEED_SEG_GAP) return -1;                                             // e.g. 68 km in 2.6 h = "16 mph" incl. a stop
   const mph = haversine(p0[1], p0[2], p1[1], p1[2]) / dt * 2.2369363;
@@ -1592,7 +1600,8 @@ function speedSec() { return logPos(Number($("#speed").value) / 1000, SPEED_MIN,
 function trailSec() { const v = Number($("#trail").value); return v >= TRAIL_WHOLE ? 0 : logPos(v / TRAIL_WHOLE, TRAIL_MIN, TRAIL_MAX); }
 /* Fixes (confidence) slider: the accuracy a fix needs to join the track line, 5 m .. 2 km on a log
    scale, far right (>= CONF_ANY) = every fix whatever its accuracy. Default = ROUGH_ACC (50 m).
-   Page-only: rings, the dots layer, speeds on the cards and the server's alerts don't change. */
+   Also used for the speeds on the cards/markers and the jump filter (dropSpikes). Page-only: the
+   server's alerts don't change. */
 const CONF_MIN = 5, CONF_MAX = 2000, CONF_ANY = 970;
 const confPosOf = (m) => Math.round(Math.log(m / CONF_MIN) / Math.log(CONF_MAX / CONF_MIN) * CONF_ANY);
 function confAcc() { const v = Number($("#conf").value); return v >= CONF_ANY ? Infinity : logPos(v / CONF_ANY, CONF_MIN, CONF_MAX); }
@@ -1610,7 +1619,11 @@ function syncSliders() {
 $("#speed").value = store.get("speedPos2", 781); $("#trail").value = store.get("trailPos", 1000);
 $("#conf").value = store.get("confPos", confPosOf(ROUGH_ACC)); syncSliders();
 $("#conf").oninput = () => { store.set("confPos", Number($("#conf").value)); syncSliders(); schedRender(); };
-$("#conf").ondblclick = () => { $("#conf").value = confPosOf(ROUGH_ACC); $("#conf").oninput(); };   // back to the default
+$("#conf").onchange = () => {   // on release: redo the jump filter and what's built on it, if it moved
+  if (!S.raw || spikeAccNow() === S.spikeAcc) return;
+  dropSpikes(); buildMoves(); computeRuns(); drawLanes(); render();
+};
+$("#conf").ondblclick = () => { $("#conf").value = confPosOf(ROUGH_ACC); $("#conf").oninput(); $("#conf").onchange(); };   // back to the default
 $("#speed").oninput = () => { store.set("speedPos2", Number($("#speed").value)); syncSliders(); };
 let trailWas = Number($("#trail").value);
 $("#trail").oninput = () => { store.set("trailPos", Number($("#trail").value)); syncSliders(); schedRender(); };
